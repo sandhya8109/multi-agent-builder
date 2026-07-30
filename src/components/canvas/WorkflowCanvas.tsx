@@ -1,57 +1,76 @@
 'use client';
 
-import { useEffect } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import {
   ReactFlow,
-  Background,
   Controls,
-  MiniMap,
-  NodeTypes,
+  Background,
+  BackgroundVariant,
+  Edge,
+  useReactFlow,
+  ReactFlowProvider,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { useCanvasStore, CustomNode } from '@/lib/hooks/useCanvasStore';
+import { useCanvasStore, CustomNode, NodeType } from '@/lib/hooks/useCanvasStore';
 import { AgentNode } from './custom-nodes/AgentNode';
-import { Button } from '@/components/ui/button';
-import { Plus, Save } from 'lucide-react';
+import { InputNode } from './custom-nodes/InputNode';
+import { OutputNode } from './custom-nodes/OutputNode';
+import { ApiNode } from './custom-nodes/ApiNode';
 
-const nodeTypes: NodeTypes = {
-  agent: AgentNode as any,
+const nodeTypes = {
+  agent: AgentNode,
+  input: InputNode,
+  output: OutputNode,
+  api: ApiNode,
 };
 
 interface WorkflowCanvasProps {
-  workflowId: string;
-  initialNodes: CustomNode[];
-  initialEdges: any[];
-  onSave: () => void;
+  initialNodes?: CustomNode[];
+  initialEdges?: Edge[];
 }
 
-export function WorkflowCanvas({
-  initialNodes,
-  initialEdges,
-  onSave,
+function InnerWorkflowCanvas({
+  initialNodes = [],
+  initialEdges = [],
 }: WorkflowCanvasProps) {
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, addNode, loadWorkflow } =
+  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, loadWorkflow, addCustomNode } =
     useCanvasStore();
 
+  const isInitialized = useRef(false);
+  const { screenToFlowPosition } = useReactFlow();
+
   useEffect(() => {
-    if (initialNodes.length > 0) {
+    if (!isInitialized.current && initialNodes && initialNodes.length > 0) {
       loadWorkflow(initialNodes, initialEdges);
+      isInitialized.current = true;
     }
   }, [initialNodes, initialEdges, loadWorkflow]);
 
-  return (
-    <div className="w-full h-[calc(100vh-4rem)] relative bg-slate-950">
-      {/* Canvas Toolbar */}
-      <div className="absolute top-4 left-4 z-10 flex gap-2">
-        <Button size="sm" onClick={() => addNode('agent')} className="gap-1 bg-blue-600 hover:bg-blue-500">
-          <Plus className="w-4 h-4" /> Add Agent Node
-        </Button>
-        <Button size="sm" variant="secondary" onClick={onSave} className="gap-1">
-          <Save className="w-4 h-4" /> Save Canvas
-        </Button>
-      </div>
+  const onDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  }, []);
 
+  const onDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault();
+
+      const type = event.dataTransfer.getData('application/reactflow') as NodeType;
+      if (!type) return;
+
+      const position = screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      });
+
+      addCustomNode(type, position);
+    },
+    [screenToFlowPosition, addCustomNode]
+  );
+
+  return (
+    <div className="w-full h-full bg-slate-950" onDragOver={onDragOver} onDrop={onDrop}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -60,11 +79,19 @@ export function WorkflowCanvas({
         onConnect={onConnect}
         nodeTypes={nodeTypes}
         fitView
+        colorMode="dark"
       >
-        <Background color="#334155" gap={16} />
-        <Controls />
-        <MiniMap nodeStrokeWidth={3} className="bg-slate-900" />
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#334155" />
+        <Controls className="bg-slate-900 border-slate-800 text-slate-100 fill-slate-100" />
       </ReactFlow>
     </div>
+  );
+}
+
+export function WorkflowCanvas(props: WorkflowCanvasProps) {
+  return (
+    <ReactFlowProvider>
+      <InnerWorkflowCanvas {...props} />
+    </ReactFlowProvider>
   );
 }

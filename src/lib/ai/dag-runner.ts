@@ -1,128 +1,193 @@
-import { generateText } from 'ai';
-import { openai } from '@ai-sdk/openai';
 import { createClient } from '@/lib/supabase/server';
-import { CustomNode } from '@/lib/hooks/useCanvasStore';
-import { Edge } from '@xyflow/react';
+import { generateText } from 'ai';
+import { createOpenAI } from '@ai-sdk/openai';
+import { createGroq } from '@ai-sdk/groq';
 
-// Topological Sort for Directed Acyclic Graph (DAG)
-function getExecutionOrder(nodes: CustomNode[], edges: Edge[]): CustomNode[] {
+const groq = createGroq({
+  apiKey: process.env.GROQ_API_KEY || '',
+});
+
+const openai = createOpenAI({
+  apiKey: process.env.OPENAI_API_KEY || '',
+});
+
+interface DAGNode {
+  id: string;
+  type?: string;
+  data: Record<string, any>;
+}
+
+interface DAGEdge {
+  id: string;
+  source: string;
+  target: string;
+}
+
+export async function runWorkflowDAG(
+  workflowId: string,
+  runId: string,
+  nodes: DAGNode[],
+  edges: DAGEdge[],
+  initialInput: string = ''
+) {
+  const supabase = await createClient();
+
+  // 1. Build In-Degree and Adjacency List for Topological Sorting
   const inDegree: Record<string, number> = {};
   const adjList: Record<string, string[]> = {};
+  const parentMap: Record<string, string[]> = {};
 
   nodes.forEach((node) => {
     inDegree[node.id] = 0;
     adjList[node.id] = [];
+    parentMap[node.id] = [];
   });
 
   edges.forEach((edge) => {
     if (adjList[edge.source]) {
       adjList[edge.source].push(edge.target);
     }
-    inDegree[edge.target] = (inDegree[edge.target] || 0) + 1;
+    if (inDegree[edge.target] !== undefined) {
+      inDegree[edge.target] += 1;
+    }
+    if (parentMap[edge.target]) {
+      parentMap[edge.target].push(edge.source);
+    }
   });
 
-  const queue: string[] = Object.keys(inDegree).filter((id) => inDegree[id] === 0);
-  const sortedIds: string[] = [];
+  // 2. Queue for start nodes (In-degree = 0)
+  const queue: string[] = Object.keys(inDegree).filter(
+    (id) => inDegree[id] === 0
+  );
 
+  const outputs: Record<string, string> = {};
+
+  // 3. Process nodes in topological order
   while (queue.length > 0) {
-    const curr = queue.shift()!;
-    sortedIds.push(curr);
+    const nodeId = queue.shift()!;
+    const node = nodes.find((n) => n.id === nodeId);
 
-    (adjList[curr] || []).forEach((neighbor) => {
-      inDegree[neighbor]--;
-      if (inDegree[neighbor] === 0) {
-        queue.push(neighbor);
-      }
+    if (!node) continue;
+
+    // Log step start in Supabase
+    await supabase.from('run_logs').insert({
+      run_id: runId,
+      node_id: node.id,
+      node_label: node.data.label || node.type || 'Node',
+      status: 'RUNNING',
+      log_data: { parent_sources: parentMap[node.id] },
     });
-  }
 
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-  return sortedIds.map((id) => nodeMap.get(id)!).filter(Boolean);
-}
+    // Gather context from upstream parent nodes
+    const parents = parentMap[node.id] || [];
+    const parentContexts = parents
+      .map((pId) => outputs[pId])
+      .filter(Boolean)
+      .join('\n\n---\n\n');
 
-export async function runWorkflowDAG(
-  workflowId: string,
-  runId: string,
-  nodes: CustomNode[],
-  edges: Edge[],
-  initialInput: string = ''
-) {
-  const supabase = await createClient();
-  const sortedNodes = getExecutionOrder(nodes, edges);
-  const nodeOutputs: Record<string, string> = {};
+    let outputText = '';
 
-  try {
-    for (const node of sortedNodes) {
-      // Find all incoming edge sources for context
-      const incomingEdges = edges.filter((e) => e.target === node.id);
-      const parentContexts = incomingEdges
-        .map((e) => `[Output from ${e.source}]:\n${nodeOutputs[e.source] || ''}`)
-        .join('\n\n');
-
-      // Log: Node Starting
-      await supabase.from('run_logs').insert({
-        run_id: runId,
-        node_id: node.id,
-        node_label: node.data.label || 'Agent',
-        status: 'RUNNING',
-        log_data: { input_context: parentContexts },
-      });
-
-      let outputText = '';
-
+    try {
       if (node.type === 'input') {
-        outputText = initialInput;
-      } else if (node.type === 'agent') {
-        const systemPrompt = node.data.systemPrompt || 'You are a helpful AI agent.';
-        const userPrompt = `Context from previous steps:\n${parentContexts || 'No prior context.'}\n\nTask Instructions:\n${node.data.role || 'Process the input.'}`;
+        outputText = node.data.value || node.data.input || initialInput;
+      } else if (node.type === 'api') {
+        // Clean & Sanitize URL
+        let rawUrl = (node.data.url || '').trim();
+        if (!rawUrl || rawUrl === 'https://jsonplaceholder.typicode.com/') {
+          rawUrl = 'https://jsonplaceholder.typicode.com/todos/1';
+        }
 
-        const response = await generateText({
-          model: openai(node.data.model || 'gpt-4o'),
-          system: systemPrompt,
-          prompt: userPrompt,
-          temperature: node.data.temperature ?? 0.7,
+        rawUrl = rawUrl.replace(/^["'\[<]+|["'\]>]+$/g, '').trim();
+
+        if (!/^https?:\/\//i.test(rawUrl)) {
+          rawUrl = `https://${rawUrl}`;
+        }
+
+        const method = (node.data.method || 'GET').toUpperCase();
+
+        const apiRes = await fetch(rawUrl, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
         });
 
+        if (!apiRes.ok) {
+          throw new Error(`HTTP ${apiRes.status}: ${apiRes.statusText}`);
+        }
+
+        const rawData = await apiRes.json().catch(() => apiRes.text());
+        outputText = typeof rawData === 'string' ? rawData : JSON.stringify(rawData, null, 2);
+      } else if (node.type === 'output') {
+        outputText = parentContexts || 'No upstream output received.';
+      } else if (node.type === 'agent') {
+        const systemPrompt =
+          node.data.systemPrompt || 'You are a helpful AI assistant.';
+        const userPrompt = parentContexts
+          ? `Context from previous steps:\n${parentContexts}`
+          : initialInput;
+        const requestedModel = node.data.model || 'llama-3.3-70b-versatile';
+        const temp = node.data.temperature ?? 0.7;
+
+        let response;
+        try {
+          if (requestedModel.startsWith('gpt-') && process.env.OPENAI_API_KEY) {
+            response = await generateText({
+              model: openai(requestedModel),
+              system: systemPrompt,
+              prompt: userPrompt,
+              temperature: temp,
+            });
+          } else {
+            response = await generateText({
+              model: groq('llama-3.3-70b-versatile'),
+              system: systemPrompt,
+              prompt: userPrompt,
+              temperature: temp,
+            });
+          }
+        } catch (modelErr) {
+          console.warn(`⚠️ Model "${requestedModel}" failed, falling back to Groq Llama 3.3...`);
+          response = await generateText({
+            model: groq('llama-3.3-70b-versatile'),
+            system: systemPrompt,
+            prompt: userPrompt,
+            temperature: temp,
+          });
+        }
+
         outputText = response.text;
-      } else {
-        // Output / Pass-through node
-        outputText = parentContexts;
       }
 
-      nodeOutputs[node.id] = outputText;
+      outputs[node.id] = outputText;
 
-      // Log: Node Success
+      // Update log as SUCCESS
       await supabase.from('run_logs').insert({
         run_id: runId,
         node_id: node.id,
-        node_label: node.data.label || 'Agent',
+        node_label: node.data.label || node.type || 'Node',
         status: 'SUCCESS',
         log_data: { output: outputText },
       });
+    } catch (err: any) {
+      console.error(`❌ Node ${node.id} execution failed:`, err);
+      await supabase.from('run_logs').insert({
+        run_id: runId,
+        node_id: node.id,
+        node_label: node.data.label || node.type || 'Node',
+        status: 'FAILED',
+        log_data: { error: err.message },
+      });
+      throw err;
     }
 
-    // Mark Workflow Run Complete
-    await supabase
-      .from('workflow_runs')
-      .update({
-        status: 'COMPLETED',
-        output_data: nodeOutputs,
-        completed_at: new Date().toISOString(),
-      })
-      .eq('id', runId);
-
-    return { success: true, outputs: nodeOutputs };
-  } catch (err: any) {
-    // Mark Workflow Run Failed
-    await supabase
-      .from('workflow_runs')
-      .update({
-        status: 'FAILED',
-        output_data: { error: err.message },
-        completed_at: new Date().toISOString(),
-      })
-      .eq('id', runId);
-
-    throw err;
+    // Decrement in-degree for downstream neighbors
+    const neighbors = adjList[node.id] || [];
+    for (const neighborId of neighbors) {
+      inDegree[neighborId] -= 1;
+      if (inDegree[neighborId] === 0) {
+        queue.push(neighborId);
+      }
+    }
   }
+
+  return { outputs };
 }

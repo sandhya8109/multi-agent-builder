@@ -1,28 +1,21 @@
-import { createClient } from '@/lib/supabase/server';
-import { notFound } from 'next/navigation';
+import { getWorkflowAction } from '@/app/actions/workflow';
 import CanvasWrapper from './CanvasWrapper';
 
-interface PageProps {
+export default async function WorkflowPage({
+  params,
+}: {
   params: Promise<{ id: string }>;
-}
-
-export default async function WorkflowPage({ params }: PageProps) {
+}) {
   const { id } = await params;
-  const supabase = await createClient();
-
-  const { data: workflow, error } = await supabase
-    .from('workflows')
-    .select('*')
-    .eq('id', id)
-    .single();
-
-  if (error || !workflow) {
-    notFound();
-  }
+  const workflow = await getWorkflowAction(id);
 
   return (
     <div className="w-screen h-screen overflow-hidden bg-slate-950">
-      <CanvasWrapper workflow={workflow} />
+      <CanvasWrapper
+        workflowId={id}
+        initialNodes={workflow?.nodes || []}
+        initialEdges={workflow?.edges || []}
+      />
     </div>
   );
 }
