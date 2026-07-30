@@ -11,6 +11,42 @@ const openai = createOpenAI({
   apiKey: process.env.OPENAI_API_KEY || '',
 });
 
+// Universal helper to parse PDF buffers across all pdf-parse module versions
+async function parsePdfBuffer(buffer: Buffer): Promise<string> {
+  // 1. Try direct CJS module path (bypasses Turbopack export wrappers)
+  try {
+    const pdfLib = require('pdf-parse/lib/pdf-parse.js');
+    if (typeof pdfLib === 'function') {
+      const res = await pdfLib(buffer);
+      if (res?.text) return res.text;
+    }
+  } catch {}
+
+  // 2. Try root module (handles both function and class exports)
+  const pdfModule = require('pdf-parse');
+
+  const fn = typeof pdfModule === 'function'
+    ? pdfModule
+    : pdfModule.default && typeof pdfModule.default === 'function'
+      ? pdfModule.default
+      : null;
+
+  if (fn) {
+    const res = await fn(buffer);
+    if (res?.text) return res.text;
+  }
+
+  const PDFParseClass = pdfModule.PDFParse || (pdfModule.default && pdfModule.default.PDFParse);
+  if (PDFParseClass) {
+    const parser = new PDFParseClass({ data: buffer });
+    const res = await parser.getText();
+    if (parser.destroy) await parser.destroy();
+    if (res?.text) return res.text;
+  }
+
+  throw new Error('Could not resolve a valid PDF parser function from pdf-parse.');
+}
+
 interface DAGNode {
   id: string;
   type?: string;
@@ -32,7 +68,6 @@ export async function runWorkflowDAG(
 ) {
   const supabase = await createClient();
 
-  // 1. Build In-Degree and Adjacency List for Topological Sorting
   const inDegree: Record<string, number> = {};
   const adjList: Record<string, string[]> = {};
   const parentMap: Record<string, string[]> = {};
@@ -55,21 +90,18 @@ export async function runWorkflowDAG(
     }
   });
 
-  // 2. Queue for start nodes (In-degree = 0)
   const queue: string[] = Object.keys(inDegree).filter(
     (id) => inDegree[id] === 0
   );
 
   const outputs: Record<string, string> = {};
 
-  // 3. Process nodes in topological order
   while (queue.length > 0) {
     const nodeId = queue.shift()!;
     const node = nodes.find((n) => n.id === nodeId);
 
     if (!node) continue;
 
-    // Log step start in Supabase
     await supabase.from('run_logs').insert({
       run_id: runId,
       node_id: node.id,
@@ -78,7 +110,6 @@ export async function runWorkflowDAG(
       log_data: { parent_sources: parentMap[node.id] },
     });
 
-    // Gather context from upstream parent nodes
     const parents = parentMap[node.id] || [];
     const parentContexts = parents
       .map((pId) => outputs[pId])
@@ -91,7 +122,6 @@ export async function runWorkflowDAG(
       if (node.type === 'input') {
         outputText = node.data.value || node.data.input || initialInput;
       } else if (node.type === 'api') {
-        // Clean & Sanitize URL
         let rawUrl = (node.data.url || '').trim();
         if (!rawUrl || rawUrl === 'https://jsonplaceholder.typicode.com/') {
           rawUrl = 'https://jsonplaceholder.typicode.com/todos/1';
@@ -107,15 +137,53 @@ export async function runWorkflowDAG(
 
         const apiRes = await fetch(rawUrl, {
           method,
-          headers: { 'Content-Type': 'application/json' },
+          redirect: 'follow',
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            Accept: 'application/pdf,application/json,text/html,*/*',
+          },
         });
 
         if (!apiRes.ok) {
           throw new Error(`HTTP ${apiRes.status}: ${apiRes.statusText}`);
         }
 
-        const rawData = await apiRes.json().catch(() => apiRes.text());
-        outputText = typeof rawData === 'string' ? rawData : JSON.stringify(rawData, null, 2);
+        const contentType = (apiRes.headers.get('content-type') || '').toLowerCase();
+        const isPdf = contentType.includes('application/pdf') || rawUrl.toLowerCase().includes('.pdf');
+
+        if (isPdf) {
+          const arrayBuffer = await apiRes.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          
+          const fullText = (await parsePdfBuffer(buffer)).trim();
+
+          if (!fullText) {
+            outputText = 'No readable text content found in PDF.';
+          } else {
+            outputText = fullText.slice(0, 35000);
+            if (fullText.length > 35000) {
+              outputText += '\n\n---\n*[Note: Document truncated to first 35,000 characters to fit model context limit.]*';
+            }
+          }
+        } else {
+          const rawText = await apiRes.text();
+
+          try {
+            const parsed = JSON.parse(rawText);
+            outputText = JSON.stringify(parsed, null, 2);
+          } catch {
+            if (contentType.includes('text/html') || rawText.trim().startsWith('<')) {
+              let cleanText = rawText.replace(/<script\b[^<]*>([\s\S]*?)<\/script>/gi, '');
+              cleanText = cleanText.replace(/<style\b[^<]*>([\s\S]*?)<\/style>/gi, '');
+              cleanText = cleanText.replace(/<[^>]+>/g, ' ');
+              cleanText = cleanText.replace(/\s+/g, ' ').trim();
+              outputText = cleanText.slice(0, 20000);
+            } else {
+              outputText = rawText;
+            }
+          }
+        }
       } else if (node.type === 'output') {
         outputText = parentContexts || 'No upstream output received.';
       } else if (node.type === 'agent') {
@@ -159,7 +227,6 @@ export async function runWorkflowDAG(
 
       outputs[node.id] = outputText;
 
-      // Update log as SUCCESS
       await supabase.from('run_logs').insert({
         run_id: runId,
         node_id: node.id,
@@ -179,7 +246,6 @@ export async function runWorkflowDAG(
       throw err;
     }
 
-    // Decrement in-degree for downstream neighbors
     const neighbors = adjList[node.id] || [];
     for (const neighborId of neighbors) {
       inDegree[neighborId] -= 1;
