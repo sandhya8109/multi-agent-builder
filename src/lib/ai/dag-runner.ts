@@ -1,259 +1,144 @@
-import { createClient } from '@/lib/supabase/server';
 import { generateText } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
-import { createGroq } from '@ai-sdk/groq';
 
-const groq = createGroq({
-  apiKey: process.env.GROQ_API_KEY || '',
-});
+// RAG text chunking and keyword relevance scoring
+function extractTopRelevantChunks(text: string, query: string, topK: number = 3): string {
+  if (!text || !query) return text.slice(0, 5000);
 
-const openai = createOpenAI({
-  apiKey: process.env.OPENAI_API_KEY || '',
-});
+  const chunks = text.split(/\n\s*\n/).filter((c) => c.trim().length > 40);
+  if (chunks.length <= topK) return text;
 
-// Universal helper to parse PDF buffers across all pdf-parse module versions
-async function parsePdfBuffer(buffer: Buffer): Promise<string> {
-  // 1. Try direct CJS module path (bypasses Turbopack export wrappers)
-  try {
-    const pdfLib = require('pdf-parse/lib/pdf-parse.js');
-    if (typeof pdfLib === 'function') {
-      const res = await pdfLib(buffer);
-      if (res?.text) return res.text;
-    }
-  } catch {}
+  const queryTerms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
 
-  // 2. Try root module (handles both function and class exports)
-  const pdfModule = require('pdf-parse');
+  const scoredChunks = chunks.map((chunk) => {
+    const chunkLower = chunk.toLowerCase();
+    let score = 0;
+    queryTerms.forEach((term) => {
+      const matches = (chunkLower.match(new RegExp(term, 'g')) || []).length;
+      score += matches * 2;
+    });
+    return { chunk, score };
+  });
 
-  const fn = typeof pdfModule === 'function'
-    ? pdfModule
-    : pdfModule.default && typeof pdfModule.default === 'function'
-      ? pdfModule.default
-      : null;
-
-  if (fn) {
-    const res = await fn(buffer);
-    if (res?.text) return res.text;
-  }
-
-  const PDFParseClass = pdfModule.PDFParse || (pdfModule.default && pdfModule.default.PDFParse);
-  if (PDFParseClass) {
-    const parser = new PDFParseClass({ data: buffer });
-    const res = await parser.getText();
-    if (parser.destroy) await parser.destroy();
-    if (res?.text) return res.text;
-  }
-
-  throw new Error('Could not resolve a valid PDF parser function from pdf-parse.');
+  scoredChunks.sort((a, b) => b.score - a.score);
+  return scoredChunks
+    .slice(0, topK)
+    .map((item, idx) => `[Relevant Passage #${idx + 1}]\n${item.chunk}`)
+    .join('\n\n---\n\n');
 }
 
-interface DAGNode {
+// Model provider helper
+function getModel(modelName: string = 'gpt-4o-mini') {
+  const groqApiKey = process.env.GROQ_API_KEY;
+  const openAiApiKey = process.env.OPENAI_API_KEY;
+
+  if (groqApiKey && (modelName.includes('llama') || modelName.includes('mixtral') || modelName.includes('gemma'))) {
+    const groqOpenAI = createOpenAI({
+      baseURL: 'https://api.groq.com/openai/v1',
+      apiKey: groqApiKey,
+    });
+    return groqOpenAI(modelName || 'llama-3.3-70b-versatile');
+  }
+
+  const openai = createOpenAI({
+    apiKey: openAiApiKey || '',
+  });
+  return openai(modelName || 'gpt-4o-mini');
+}
+
+interface Node {
   id: string;
-  type?: string;
+  type: string;
   data: Record<string, any>;
 }
 
-interface DAGEdge {
-  id: string;
+interface Edge {
   source: string;
   target: string;
 }
 
-export async function runWorkflowDAG(
-  workflowId: string,
-  runId: string,
-  nodes: DAGNode[],
-  edges: DAGEdge[],
-  initialInput: string = ''
-) {
-  const supabase = await createClient();
-
-  const inDegree: Record<string, number> = {};
-  const adjList: Record<string, string[]> = {};
-  const parentMap: Record<string, string[]> = {};
-
-  nodes.forEach((node) => {
-    inDegree[node.id] = 0;
-    adjList[node.id] = [];
-    parentMap[node.id] = [];
-  });
-
-  edges.forEach((edge) => {
-    if (adjList[edge.source]) {
-      adjList[edge.source].push(edge.target);
-    }
-    if (inDegree[edge.target] !== undefined) {
-      inDegree[edge.target] += 1;
-    }
-    if (parentMap[edge.target]) {
-      parentMap[edge.target].push(edge.source);
-    }
-  });
-
-  const queue: string[] = Object.keys(inDegree).filter(
-    (id) => inDegree[id] === 0
-  );
+export async function runWorkflowDAG(nodes: Node[] = [], edges: Edge[] = []) {
+  const safeNodes = Array.isArray(nodes) ? nodes : [];
+  const safeEdges = Array.isArray(edges) ? edges : [];
 
   const outputs: Record<string, string> = {};
+  const metricsMap: Record<string, { latency: string; tokens: number }> = {};
 
-  while (queue.length > 0) {
-    const nodeId = queue.shift()!;
-    const node = nodes.find((n) => n.id === nodeId);
+  const incomingEdges: Record<string, string[]> = {};
+  safeNodes.forEach((n) => {
+    incomingEdges[n.id] = [];
+  });
+  safeEdges.forEach((e) => {
+    if (incomingEdges[e.target]) {
+      incomingEdges[e.target].push(e.source);
+    }
+  });
 
-    if (!node) continue;
+  for (const node of safeNodes) {
+    const startTime = Date.now();
+    let outputText = '';
+    let executionMetrics = { latency: '0s', tokens: 0 };
 
-    await supabase.from('run_logs').insert({
-      run_id: runId,
-      node_id: node.id,
-      node_label: node.data.label || node.type || 'Node',
-      status: 'RUNNING',
-      log_data: { parent_sources: parentMap[node.id] },
-    });
-
-    const parents = parentMap[node.id] || [];
-    const parentContexts = parents
+    const parentIds = incomingEdges[node.id] || [];
+    const parentContexts = parentIds
       .map((pId) => outputs[pId])
       .filter(Boolean)
       .join('\n\n---\n\n');
 
-    let outputText = '';
-
-    try {
-      if (node.type === 'input') {
-        outputText = node.data.value || node.data.input || initialInput;
-      } else if (node.type === 'api') {
-        let rawUrl = (node.data.url || '').trim();
-        if (!rawUrl || rawUrl === 'https://jsonplaceholder.typicode.com/') {
-          rawUrl = 'https://jsonplaceholder.typicode.com/todos/1';
+    if (node.type === 'input') {
+      outputText = node.data?.value || '';
+    } else if (node.type === 'api') {
+      const url = node.data?.url || node.data?.endpoint || '';
+      if (url) {
+        try {
+          const res = await fetch(url);
+          outputText = await res.text();
+        } catch (err: any) {
+          outputText = `API Fetch Error: ${err.message}`;
         }
+      } else {
+        outputText = 'No URL provided for API Fetcher node.';
+      }
+    } else if (node.type === 'rag') {
+      const query = node.data?.query || '';
+      const topK = node.data?.topK || 3;
+      outputText = extractTopRelevantChunks(parentContexts, query, topK);
+    } else if (node.type === 'agent') {
+      const systemInstructions =
+        node.data?.systemInstructions ||
+        node.data?.instructions ||
+        'Summarize the input context.';
+      const modelName = node.data?.model || 'gpt-4o-mini';
 
-        rawUrl = rawUrl.replace(/^["'\[<]+|["'\]>]+$/g, '').trim();
+      const prompt = parentContexts
+        ? `Context Data:\n${parentContexts}\n\nTask Instructions:\n${systemInstructions}`
+        : systemInstructions;
 
-        if (!/^https?:\/\//i.test(rawUrl)) {
-          rawUrl = `https://${rawUrl}`;
-        }
-
-        const method = (node.data.method || 'GET').toUpperCase();
-
-        const apiRes = await fetch(rawUrl, {
-          method,
-          redirect: 'follow',
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            Accept: 'application/pdf,application/json,text/html,*/*',
-          },
+      try {
+        const model = getModel(modelName);
+        const response = await generateText({
+          model,
+          prompt,
+          temperature: node.data?.temperature ?? 0.7,
         });
 
-        if (!apiRes.ok) {
-          throw new Error(`HTTP ${apiRes.status}: ${apiRes.statusText}`);
-        }
-
-        const contentType = (apiRes.headers.get('content-type') || '').toLowerCase();
-        const isPdf = contentType.includes('application/pdf') || rawUrl.toLowerCase().includes('.pdf');
-
-        if (isPdf) {
-          const arrayBuffer = await apiRes.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
-          
-          const fullText = (await parsePdfBuffer(buffer)).trim();
-
-          if (!fullText) {
-            outputText = 'No readable text content found in PDF.';
-          } else {
-            outputText = fullText.slice(0, 35000);
-            if (fullText.length > 35000) {
-              outputText += '\n\n---\n*[Note: Document truncated to first 35,000 characters to fit model context limit.]*';
-            }
-          }
-        } else {
-          const rawText = await apiRes.text();
-
-          try {
-            const parsed = JSON.parse(rawText);
-            outputText = JSON.stringify(parsed, null, 2);
-          } catch {
-            if (contentType.includes('text/html') || rawText.trim().startsWith('<')) {
-              let cleanText = rawText.replace(/<script\b[^<]*>([\s\S]*?)<\/script>/gi, '');
-              cleanText = cleanText.replace(/<style\b[^<]*>([\s\S]*?)<\/style>/gi, '');
-              cleanText = cleanText.replace(/<[^>]+>/g, ' ');
-              cleanText = cleanText.replace(/\s+/g, ' ').trim();
-              outputText = cleanText.slice(0, 20000);
-            } else {
-              outputText = rawText;
-            }
-          }
-        }
-      } else if (node.type === 'output') {
-        outputText = parentContexts || 'No upstream output received.';
-      } else if (node.type === 'agent') {
-        const systemPrompt =
-          node.data.systemPrompt || 'You are a helpful AI assistant.';
-        const userPrompt = parentContexts
-          ? `Context from previous steps:\n${parentContexts}`
-          : initialInput;
-        const requestedModel = node.data.model || 'llama-3.3-70b-versatile';
-        const temp = node.data.temperature ?? 0.7;
-
-        let response;
-        try {
-          if (requestedModel.startsWith('gpt-') && process.env.OPENAI_API_KEY) {
-            response = await generateText({
-              model: openai(requestedModel),
-              system: systemPrompt,
-              prompt: userPrompt,
-              temperature: temp,
-            });
-          } else {
-            response = await generateText({
-              model: groq('llama-3.3-70b-versatile'),
-              system: systemPrompt,
-              prompt: userPrompt,
-              temperature: temp,
-            });
-          }
-        } catch (modelErr) {
-          console.warn(`⚠️ Model "${requestedModel}" failed, falling back to Groq Llama 3.3...`);
-          response = await generateText({
-            model: groq('llama-3.3-70b-versatile'),
-            system: systemPrompt,
-            prompt: userPrompt,
-            temperature: temp,
-          });
-        }
-
         outputText = response.text;
+        const tokenUsage = response.usage?.totalTokens || 0;
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+        executionMetrics = { latency: `${duration}s`, tokens: tokenUsage };
+      } catch (err: any) {
+        outputText = `Agent Execution Error: ${err.message}`;
       }
-
-      outputs[node.id] = outputText;
-
-      await supabase.from('run_logs').insert({
-        run_id: runId,
-        node_id: node.id,
-        node_label: node.data.label || node.type || 'Node',
-        status: 'SUCCESS',
-        log_data: { output: outputText },
-      });
-    } catch (err: any) {
-      console.error(`❌ Node ${node.id} execution failed:`, err);
-      await supabase.from('run_logs').insert({
-        run_id: runId,
-        node_id: node.id,
-        node_label: node.data.label || node.type || 'Node',
-        status: 'FAILED',
-        log_data: { error: err.message },
-      });
-      throw err;
+    } else if (node.type === 'output') {
+      outputText = parentContexts || 'No upstream content received.';
     }
 
-    const neighbors = adjList[node.id] || [];
-    for (const neighborId of neighbors) {
-      inDegree[neighborId] -= 1;
-      if (inDegree[neighborId] === 0) {
-        queue.push(neighborId);
-      }
+    outputs[node.id] = outputText;
+    metricsMap[node.id] = executionMetrics;
+    if (node.data) {
+      node.data.metrics = executionMetrics;
     }
   }
 
-  return { outputs };
+  return { outputs, metricsMap };
 }

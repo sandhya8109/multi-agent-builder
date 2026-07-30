@@ -1,95 +1,66 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { runWorkflowDAG } from '@/lib/ai/dag-runner';
 
 export async function POST(
-  req: NextRequest,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id: workflowId } = await params;
-    const body = await req.json().catch(() => ({}));
-    const inputData = body.input_data || 'Start initial workflow execution.';
-
+    const { id } = await params;
     const supabase = await createClient();
 
-    // Fetch active session user if available
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    // 1. Fetch the workflow definition
-    const { data: workflow, error: wfError } = await supabase
+    // Fetch workflow data from database
+    const { data: workflow, error } = await supabase
       .from('workflows')
       .select('*')
-      .eq('id', workflowId)
+      .eq('id', id)
       .single();
 
-    if (wfError || !workflow) {
+    if (error || !workflow) {
       return NextResponse.json(
-        { error: `Workflow not found: ${wfError?.message || 'Invalid ID'}` },
+        { success: false, error: 'Workflow not found in database.' },
         { status: 404 }
       );
     }
 
-    // Determine user ID (prefer logged-in user, fallback to workflow creator)
-    const runUserId = user?.id || workflow.user_id || null;
+    // Safely parse nodes & edges
+    let nodes = workflow.nodes || [];
+    let edges = workflow.edges || [];
 
-    // 2. Prepare payload and insert execution record
-    const insertPayload: Record<string, any> = {
-      workflow_id: workflowId,
-      status: 'RUNNING',
-    };
-
-    if (runUserId) {
-      insertPayload.user_id = runUserId;
+    if (typeof nodes === 'string') {
+      try { nodes = JSON.parse(nodes); } catch {}
+    }
+    if (typeof edges === 'string') {
+      try { edges = JSON.parse(edges); } catch {}
     }
 
-    const { data: run, error: runError } = await supabase
-      .from('workflow_runs')
-      .insert(insertPayload)
-      .select()
-      .single();
+    if (!Array.isArray(nodes)) nodes = [];
+    if (!Array.isArray(edges)) edges = [];
 
-    if (runError) {
-      console.error('❌ Failed to insert into workflow_runs:', runError);
-      return NextResponse.json(
-        { error: `Failed to create run log: ${runError.message}` },
-        { status: 500 }
-      );
-    }
-
-    // 3. Execute the DAG / Agent pipeline
-    try {
-      const dagResult = await runWorkflowDAG(
-        workflowId,
-        run.id,
-        workflow.nodes || [],
-        workflow.edges || [],
-        inputData
-      );
-
+    if (nodes.length === 0) {
       return NextResponse.json({
         success: true,
-        runId: run.id,
-        outputs: dagResult.outputs,
+        runId: `run_${Date.now()}`,
+        outputs: {},
+        metrics: {},
+        message: 'No nodes present on canvas to execute.',
       });
-    } catch (execErr: any) {
-      console.error('❌ DAG Execution Error:', execErr);
-      await supabase
-        .from('workflow_runs')
-        .update({ status: 'FAILED' })
-        .eq('id', run.id);
-
-      return NextResponse.json(
-        { error: execErr.message || 'Agent execution failed' },
-        { status: 500 }
-      );
     }
+
+    // Execute workflow DAG
+    const { outputs, metricsMap } = await runWorkflowDAG(nodes, edges);
+
+    return NextResponse.json({
+      success: true,
+      runId: `run_${Date.now()}`,
+      outputs,
+      metrics: metricsMap,
+    });
   } catch (err: any) {
-    console.error('❌ Execute Route Exception:', err);
+    console.error('Workflow execution error:', err);
     return NextResponse.json(
-      { error: err.message || 'Internal Server Error' },
+      { success: false, error: err.message || 'Workflow execution failed.' },
       { status: 500 }
     );
   }

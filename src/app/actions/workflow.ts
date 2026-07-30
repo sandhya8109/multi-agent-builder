@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
+import { RAGNode } from '@/components/canvas/custom-nodes/RAGNode';
 
 export async function createWorkflowAction() {
   const supabase = await createClient();
@@ -35,7 +36,7 @@ export async function createWorkflowAction() {
   const initialEdges = [
     { id: 'edge_1', source: 'node_input', target: 'node_agent_1', animated: true },
   ];
-
+ 
   const insertPayload: Record<string, any> = {
     name: 'New Multi-Agent Workflow',
     description: 'Chained AI processing pipeline',

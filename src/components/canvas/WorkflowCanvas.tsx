@@ -1,52 +1,75 @@
 'use client';
 
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useCallback, useRef, useEffect } from 'react';
 import {
   ReactFlow,
-  Controls,
   Background,
+  Controls,
+  MiniMap,
   BackgroundVariant,
-  Edge,
-  useReactFlow,
   ReactFlowProvider,
+  useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { useCanvasStore, CustomNode, NodeType } from '@/lib/hooks/useCanvasStore';
+import { useCanvasStore } from '@/lib/hooks/useCanvasStore';
+
 import { AgentNode } from './custom-nodes/AgentNode';
 import { InputNode } from './custom-nodes/InputNode';
 import { OutputNode } from './custom-nodes/OutputNode';
 import { ApiNode } from './custom-nodes/ApiNode';
+import { RAGNode } from './custom-nodes/RAGNode';
 
 const nodeTypes = {
   agent: AgentNode,
   input: InputNode,
   output: OutputNode,
   api: ApiNode,
+  rag: RAGNode,
 };
 
 interface WorkflowCanvasProps {
-  initialNodes?: CustomNode[];
-  initialEdges?: Edge[];
+  workflowId: string;
 }
 
-function InnerWorkflowCanvas({
-  initialNodes = [],
-  initialEdges = [],
-}: WorkflowCanvasProps) {
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, loadWorkflow, addCustomNode } =
-    useCanvasStore();
+function InnerWorkflowCanvas({ workflowId }: WorkflowCanvasProps) {
+  const {
+    nodes,
+    edges,
+    onNodesChange,
+    onEdgesChange,
+    onConnect,
+    addNode,
+    setNodes,
+    setEdges,
+  } = useCanvasStore();
 
   const isInitialized = useRef(false);
   const { screenToFlowPosition } = useReactFlow();
 
+  // Load saved workflow state on mount
   useEffect(() => {
-    if (!isInitialized.current && initialNodes && initialNodes.length > 0) {
-      loadWorkflow(initialNodes, initialEdges);
-      isInitialized.current = true;
-    }
-  }, [initialNodes, initialEdges, loadWorkflow]);
+    if (isInitialized.current) return;
+    isInitialized.current = true;
 
+    async function loadCanvas() {
+      try {
+        const res = await fetch(`/api/workflows/${workflowId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.workflow) {
+          if (data.workflow.nodes) setNodes(data.workflow.nodes);
+          if (data.workflow.edges) setEdges(data.workflow.edges);
+        }
+      } catch (err) {
+        console.error('Failed to load workflow state:', err);
+      }
+    }
+
+    loadCanvas();
+  }, [workflowId, setNodes, setEdges]);
+
+  // Handle Drag & Drop Node Creation from NodePalette
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
@@ -56,7 +79,7 @@ function InnerWorkflowCanvas({
     (event: React.DragEvent) => {
       event.preventDefault();
 
-      const type = event.dataTransfer.getData('application/reactflow') as NodeType;
+      const type = event.dataTransfer.getData('application/reactflow');
       if (!type) return;
 
       const position = screenToFlowPosition({
@@ -64,9 +87,16 @@ function InnerWorkflowCanvas({
         y: event.clientY,
       });
 
-      addCustomNode(type, position);
+      const newNode = {
+        id: `node_${type}_${Date.now()}`,
+        type,
+        position,
+        data: { label: `${type.toUpperCase()} Node` },
+      };
+
+      addNode(newNode);
     },
-    [screenToFlowPosition, addCustomNode]
+    [screenToFlowPosition, addNode]
   );
 
   return (
@@ -82,7 +112,13 @@ function InnerWorkflowCanvas({
         colorMode="dark"
       >
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#334155" />
-        <Controls className="bg-slate-900 border-slate-800 text-slate-100 fill-slate-100" />
+        <Controls className="!bg-slate-900 !border-slate-800 !text-slate-200 fill-slate-200" />
+        <MiniMap
+          nodeStrokeWidth={3}
+          zoomable
+          pannable
+          className="!bg-slate-900/80 !border-slate-800"
+        />
       </ReactFlow>
     </div>
   );

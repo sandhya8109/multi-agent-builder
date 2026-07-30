@@ -41,7 +41,14 @@ export function AgentNode({ id, data }: NodeProps) {
               <XCircle className="w-3 h-3" /> Failed
             </span>
           )}
-
+          {/* Execution Metrics Badge */}
+          {(data as any).metrics && (
+            <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-2 py-1 rounded text-[10px] text-slate-400 font-mono mt-2">
+              <span>⚡ {(data as any).metrics.latency}</span>
+              <span>•</span>
+              <span>🎟️ {(data as any).metrics.tokens} tokens</span>
+            </div>
+          )}
           <button
             onClick={() => deleteNode(id)}
             className="text-slate-500 hover:text-rose-400 p-1 rounded-md hover:bg-slate-800 transition-colors"
