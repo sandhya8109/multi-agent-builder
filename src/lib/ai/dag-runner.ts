@@ -1,144 +1,122 @@
-import { generateText } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
+import { createGroq } from '@ai-sdk/groq';
+import { generateText } from 'ai';
 
-// RAG text chunking and keyword relevance scoring
-function extractTopRelevantChunks(text: string, query: string, topK: number = 3): string {
-  if (!text || !query) return text.slice(0, 5000);
+// Initialize Provider Instances
+const openai = createOpenAI({
+  apiKey: process.env.OPENAI_API_KEY || '',
+});
 
-  const chunks = text.split(/\n\s*\n/).filter((c) => c.trim().length > 40);
-  if (chunks.length <= topK) return text;
+const groq = createGroq({
+  apiKey: process.env.GROQ_API_KEY || '',
+});
 
-  const queryTerms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+// Helper to select the correct AI model instance
+// Helper to select the correct AI model instance with fallback for deprecated models
+function getModelInstance(modelName: string) {
+  let model = modelName ? modelName.trim() : '';
 
-  const scoredChunks = chunks.map((chunk) => {
-    const chunkLower = chunk.toLowerCase();
-    let score = 0;
-    queryTerms.forEach((term) => {
-      const matches = (chunkLower.match(new RegExp(term, 'g')) || []).length;
-      score += matches * 2;
-    });
-    return { chunk, score };
-  });
-
-  scoredChunks.sort((a, b) => b.score - a.score);
-  return scoredChunks
-    .slice(0, topK)
-    .map((item, idx) => `[Relevant Passage #${idx + 1}]\n${item.chunk}`)
-    .join('\n\n---\n\n');
-}
-
-// Model provider helper
-function getModel(modelName: string = 'gpt-4o-mini') {
-  const groqApiKey = process.env.GROQ_API_KEY;
-  const openAiApiKey = process.env.OPENAI_API_KEY;
-
-  if (groqApiKey && (modelName.includes('llama') || modelName.includes('mixtral') || modelName.includes('gemma'))) {
-    const groqOpenAI = createOpenAI({
-      baseURL: 'https://api.groq.com/openai/v1',
-      apiKey: groqApiKey,
-    });
-    return groqOpenAI(modelName || 'llama-3.3-70b-versatile');
+  // 1. Remap decommissioned Groq model names to active equivalents
+  if (
+    !model ||
+    model.includes('llama3-8b-8192') ||
+    model.includes('llama3-8b') ||
+    model === 'llama3-70b-8192'
+  ) {
+    return groq('llama-3.1-8b-instant');
   }
 
-  const openai = createOpenAI({
-    apiKey: openAiApiKey || '',
-  });
-  return openai(modelName || 'gpt-4o-mini');
+  if (model.includes('llama-3.3') || model.includes('70b')) {
+    return groq('llama-3.3-70b-versatile');
+  }
+
+  // 2. Handle Groq / Llama models
+  if (model.toLowerCase().includes('llama') || model.toLowerCase().includes('groq') || model.toLowerCase().includes('mixtral')) {
+    return groq(model);
+  }
+
+  // 3. Handle OpenAI models
+  return openai(model || 'gpt-4o-mini');
 }
 
-interface Node {
-  id: string;
-  type: string;
-  data: Record<string, any>;
-}
+export async function executeWorkflowDAG(nodes: any[], edges: any[]) {
+  const nodeOutputs: Record<string, any> = {};
 
-interface Edge {
-  source: string;
-  target: string;
-}
-
-export async function runWorkflowDAG(nodes: Node[] = [], edges: Edge[] = []) {
-  const safeNodes = Array.isArray(nodes) ? nodes : [];
-  const safeEdges = Array.isArray(edges) ? edges : [];
-
-  const outputs: Record<string, string> = {};
-  const metricsMap: Record<string, { latency: string; tokens: number }> = {};
-
+  // Build adjacency map to find upstream inputs for each node
   const incomingEdges: Record<string, string[]> = {};
-  safeNodes.forEach((n) => {
-    incomingEdges[n.id] = [];
-  });
-  safeEdges.forEach((e) => {
-    if (incomingEdges[e.target]) {
-      incomingEdges[e.target].push(e.source);
+  edges.forEach((edge) => {
+    if (!incomingEdges[edge.target]) {
+      incomingEdges[edge.target] = [];
     }
+    incomingEdges[edge.target].push(edge.source);
   });
 
-  for (const node of safeNodes) {
-    const startTime = Date.now();
-    let outputText = '';
-    let executionMetrics = { latency: '0s', tokens: 0 };
+  // Topologically process / execute nodes
+  for (const node of nodes) {
+    const parentNodeIds = incomingEdges[node.id] || [];
 
-    const parentIds = incomingEdges[node.id] || [];
-    const parentContexts = parentIds
-      .map((pId) => outputs[pId])
+    // Collect all incoming context (Resume + Job Description)
+    const combinedParentInputs = parentNodeIds
+      .map((parentId) => {
+        const parentOutput = nodeOutputs[parentId];
+        if (!parentOutput) return '';
+        return typeof parentOutput === 'string'
+          ? parentOutput
+          : JSON.stringify(parentOutput, null, 2);
+      })
       .filter(Boolean)
-      .join('\n\n---\n\n');
+      .join('\n\n--- INCOMING INPUT ---\n\n');
 
-    if (node.type === 'input') {
-      outputText = node.data?.value || '';
-    } else if (node.type === 'api') {
-      const url = node.data?.url || node.data?.endpoint || '';
-      if (url) {
-        try {
-          const res = await fetch(url);
-          outputText = await res.text();
-        } catch (err: any) {
-          outputText = `API Fetch Error: ${err.message}`;
-        }
-      } else {
-        outputText = 'No URL provided for API Fetcher node.';
-      }
-    } else if (node.type === 'rag') {
-      const query = node.data?.query || '';
-      const topK = node.data?.topK || 3;
-      outputText = extractTopRelevantChunks(parentContexts, query, topK);
-    } else if (node.type === 'agent') {
-      const systemInstructions =
-        node.data?.systemInstructions ||
-        node.data?.instructions ||
-        'Summarize the input context.';
-      const modelName = node.data?.model || 'gpt-4o-mini';
+    try {
+      if (node.type === 'agentNode' || node.type === 'agent') {
+        const modelName = node.data?.model || 'llama-3.1-8b-instant';
+        const systemInstructions =
+          node.data?.instructions ||
+          node.data?.systemPrompt ||
+          'You are a helpful assistant.';
 
-      const prompt = parentContexts
-        ? `Context Data:\n${parentContexts}\n\nTask Instructions:\n${systemInstructions}`
-        : systemInstructions;
+        // Truncate input text to safely avoid token limits (~10,000 chars)
+        const contextText = combinedParentInputs || node.data?.value || '';
+        const safeContext = contextText.slice(0, 10000);
 
-      try {
-        const model = getModel(modelName);
-        const response = await generateText({
-          model,
-          prompt,
-          temperature: node.data?.temperature ?? 0.7,
+        const result = await generateText({
+          model: getModelInstance(modelName),
+          system: systemInstructions,
+          prompt: safeContext
+            ? `Here is the data to analyze:\n\n${safeContext}`
+            : 'Please execute your task.',
+          temperature: node.data?.temperature ?? 0.3,
         });
 
-        outputText = response.text;
-        const tokenUsage = response.usage?.totalTokens || 0;
-        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-        executionMetrics = { latency: `${duration}s`, tokens: tokenUsage };
-      } catch (err: any) {
-        outputText = `Agent Execution Error: ${err.message}`;
+        nodeOutputs[node.id] = result.text;
+        node.data.output = result.text;
+        node.data.status = 'SUCCESS';
+      } else if (node.type === 'inputNode' || node.type === 'input') {
+        const content = node.data?.value || node.data?.content || '';
+        nodeOutputs[node.id] = content;
+        node.data.output = content;
+        node.data.status = 'SUCCESS';
+      } else if (node.type === 'apiNode' || node.type === 'apiFetcher') {
+        const content =
+          node.data?.output || node.data?.response || node.data?.url || '';
+        nodeOutputs[node.id] = content;
+        node.data.output = content;
+        node.data.status = 'SUCCESS';
+      } else {
+        nodeOutputs[node.id] = combinedParentInputs || node.data?.value || '';
+        node.data.output = nodeOutputs[node.id];
+        node.data.status = 'SUCCESS';
       }
-    } else if (node.type === 'output') {
-      outputText = parentContexts || 'No upstream content received.';
-    }
-
-    outputs[node.id] = outputText;
-    metricsMap[node.id] = executionMetrics;
-    if (node.data) {
-      node.data.metrics = executionMetrics;
+    } catch (err: any) {
+      console.error(`Error executing node ${node.id}:`, err);
+      node.data.status = 'FAILED';
+      node.data.output = `Agent Execution Error: ${err.message}`;
+      nodeOutputs[node.id] = `Agent Execution Error: ${err.message}`;
     }
   }
 
-  return { outputs, metricsMap };
+  return { nodes, outputs: nodeOutputs };
 }
+
+// Export alias to satisfy imports looking for runWorkflowDAG
+export const runWorkflowDAG = executeWorkflowDAG;

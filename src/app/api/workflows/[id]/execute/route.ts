@@ -1,66 +1,68 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { runWorkflowDAG } from '@/lib/ai/dag-runner';
+import { createClient } from '@/lib/supabase/server';
 
 export async function POST(
   req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> | { id: string } }
 ) {
   try {
-    const { id } = await params;
-    const supabase = await createClient();
+    const resolvedParams = await params;
+    const workflowId = resolvedParams.id;
 
-    // Fetch workflow data from database
-    const { data: workflow, error } = await supabase
-      .from('workflows')
-      .select('*')
-      .eq('id', id)
-      .single();
+    let body: any = {};
+    try {
+      body = await req.json();
+    } catch {
+      // Empty body passed
+    }
 
-    if (error || !workflow) {
+    let nodes = body.nodes;
+    let edges = body.edges;
+
+    // Fallback: If nodes or edges were not provided in the request body, load them from Supabase
+    if (!nodes || !edges) {
+      try {
+        const supabase = await createClient();
+        const { data: workflow } = await supabase
+          .from('workflows')
+          .select('nodes, edges')
+          .eq('id', workflowId)
+          .single();
+
+        if (workflow) {
+          nodes = nodes || workflow.nodes;
+          edges = edges || workflow.edges;
+        }
+      } catch (dbErr) {
+        console.warn('Could not fetch workflow from database fallback:', dbErr);
+      }
+    }
+
+    // Default to empty arrays if still missing
+    nodes = Array.isArray(nodes) ? nodes : [];
+    edges = Array.isArray(edges) ? edges : [];
+
+    if (nodes.length === 0) {
       return NextResponse.json(
-        { success: false, error: 'Workflow not found in database.' },
-        { status: 404 }
+        { success: false, error: 'Canvas is empty. Add nodes to execute the workflow.' },
+        { status: 400 }
       );
     }
 
-    // Safely parse nodes & edges
-    let nodes = workflow.nodes || [];
-    let edges = workflow.edges || [];
-
-    if (typeof nodes === 'string') {
-      try { nodes = JSON.parse(nodes); } catch {}
-    }
-    if (typeof edges === 'string') {
-      try { edges = JSON.parse(edges); } catch {}
-    }
-
-    if (!Array.isArray(nodes)) nodes = [];
-    if (!Array.isArray(edges)) edges = [];
-
-    if (nodes.length === 0) {
-      return NextResponse.json({
-        success: true,
-        runId: `run_${Date.now()}`,
-        outputs: {},
-        metrics: {},
-        message: 'No nodes present on canvas to execute.',
-      });
-    }
-
-    // Execute workflow DAG
-    const { outputs, metricsMap } = await runWorkflowDAG(nodes, edges);
+    // Run execution pipeline
+    const result = await runWorkflowDAG(nodes, edges);
 
     return NextResponse.json({
       success: true,
-      runId: `run_${Date.now()}`,
-      outputs,
-      metrics: metricsMap,
+      workflowId,
+      nodes: result.nodes,
+      outputs: result.outputs,
     });
-  } catch (err: any) {
-    console.error('Workflow execution error:', err);
+  } catch (error: any) {
+    console.error('Workflow execution error:', error);
     return NextResponse.json(
-      { success: false, error: err.message || 'Workflow execution failed.' },
+      { success: false, error: error.message || 'Execution failed.' },
       { status: 500 }
     );
   }

@@ -10,37 +10,31 @@ export function InputNode({ id, data }: NodeProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
 
-    setIsUploading(true);
-    try {
-      if (file.name.toLowerCase().endsWith('.pdf')) {
-        const formData = new FormData();
-        formData.append('file', file);
-        const res = await fetch('/api/parse-pdf', {
-          method: 'POST',
-          body: formData,
-        });
-        const json = await res.json();
-        if (json.text) {
-          updateNodeData(id, { value: json.text });
-        }
-      } else {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const content = event.target?.result as string;
-          updateNodeData(id, { value: content });
-        };
-        reader.readAsText(file);
-      }
-    } catch (err) {
-      console.error('File read error:', err);
-    } finally {
-      setIsUploading(false);
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const res = await fetch('/api/parse-pdf', {
+      method: 'POST',
+      body: formData,
+    });
+
+    const data = await res.json();
+
+    if (data.success) {
+      updateNodeData(id, { value: data.text, fileName: data.filename });
+    } else {
+      alert('Upload error: ' + data.error);
     }
-  };
+  } catch (err: any) {
+    console.error('File upload error:', err);
+    alert('Failed to parse file.');
+  }
+};  
 
   return (
     <div className="w-80 rounded-xl border border-slate-800 bg-slate-950/90 p-4 text-slate-100 backdrop-blur-md shadow-lg">
@@ -68,7 +62,7 @@ export function InputNode({ id, data }: NodeProps) {
             type="file"
             ref={fileInputRef}
             onChange={handleFileUpload}
-            accept=".pdf,.txt,.csv,.json,.md"
+            accept="*"
             className="hidden"
           />
 

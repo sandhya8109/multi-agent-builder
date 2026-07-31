@@ -5,9 +5,10 @@ import { Button } from '@/components/ui/button';
 import { WorkflowCanvas } from '@/components/canvas/WorkflowCanvas';
 import { NodePalette } from '@/components/canvas/NodePalette';
 import { ExecutionLogsSheet } from '@/components/canvas/ExecutionLogsSheet';
+import { NodeSettingsSheet } from '@/components/canvas/NodeSettingsSheet';
 import { useCanvasStore } from '@/lib/hooks/useCanvasStore';
 import { getLayoutedElements } from '@/lib/utils/layout';
-import { Play, Save, LayoutGrid, Terminal } from 'lucide-react';
+import { Play, Save, LayoutGrid, Terminal, Download, Upload } from 'lucide-react';
 
 interface CanvasWrapperProps {
   workflowId: string;
@@ -16,23 +17,24 @@ interface CanvasWrapperProps {
 export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
   const [isRunning, setIsRunning] = useState(false);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
 
-  // Zustand Canvas Store
+  // Zustand Store
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
   const setNodes = useCanvasStore((s) => s.setNodes);
   const setEdges = useCanvasStore((s) => s.setEdges);
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
 
-  // 1. Auto Layout Handler
+  // Auto Layout
   const handleAutoLayout = () => {
     const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nodes, edges);
     setNodes(layoutedNodes);
     setEdges(layoutedEdges);
   };
 
-  // 2. Save Canvas Action
+  // Save Canvas
   const handleSaveCanvas = async () => {
     try {
       await fetch(`/api/workflows/${workflowId}`, {
@@ -45,12 +47,42 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
     }
   };
 
-  // 3. Run Workflow Action
+  // Export JSON
+  const handleExportJSON = () => {
+    const dataStr =
+      'data:text/json;charset=utf-8,' +
+      encodeURIComponent(JSON.stringify({ nodes, edges }, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute('href', dataStr);
+    downloadAnchor.setAttribute('download', `workflow-${workflowId}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  // Import JSON
+  const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = JSON.parse(event.target?.result as string);
+        if (Array.isArray(content.nodes)) setNodes(content.nodes);
+        if (Array.isArray(content.edges)) setEdges(content.edges);
+      } catch {
+        alert('Invalid workflow JSON structure.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // Run Workflow Action
   const handleRunWorkflow = async () => {
     setIsRunning(true);
     await handleSaveCanvas();
 
-    // Ensure nodes is always treated as an array
     const safeNodes = Array.isArray(nodes) ? nodes : [];
 
     safeNodes.forEach((node) => {
@@ -102,8 +134,8 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-slate-950 text-slate-100 overflow-hidden">
-      {/* Top Header / Toolbar */}
+    <div className="flex flex-col h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
+      {/* Top Toolbar */}
       <header className="h-14 border-b border-slate-800 bg-slate-950/80 px-4 flex items-center justify-between z-10 backdrop-blur-md">
         <div className="flex items-center gap-3">
           <span className="font-semibold text-sm tracking-wide text-slate-200">
@@ -112,7 +144,7 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Auto Layout Button */}
+          {/* Auto Layout */}
           <Button
             onClick={handleAutoLayout}
             size="sm"
@@ -122,6 +154,29 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
           >
             <LayoutGrid className="w-3.5 h-3.5 text-amber-400" /> Auto Layout
           </Button>
+
+          {/* Export JSON */}
+          <Button
+            onClick={handleExportJSON}
+            size="sm"
+            variant="outline"
+            className="border-slate-800 text-slate-300 hover:bg-slate-900 text-xs flex items-center gap-1.5"
+          >
+            <Download className="w-3.5 h-3.5 text-emerald-400" /> Export
+          </Button>
+
+          {/* Import JSON */}
+          <label className="cursor-pointer">
+            <input
+              type="file"
+              accept=".json"
+              onChange={handleImportJSON}
+              className="hidden"
+            />
+            <div className="border border-slate-800 text-slate-300 hover:bg-slate-900 text-xs px-3 py-1.5 rounded-md flex items-center gap-1.5 font-medium transition-colors">
+              <Upload className="w-3.5 h-3.5 text-cyan-400" /> Import
+            </div>
+          </label>
 
           {/* Save Button */}
           <Button
@@ -143,7 +198,7 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
             <Terminal className="w-3.5 h-3.5 text-purple-400" /> Logs
           </Button>
 
-          {/* Run Workflow Button */}
+          {/* Run Workflow */}
           <Button
             onClick={handleRunWorkflow}
             disabled={isRunning}
@@ -156,12 +211,21 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
         </div>
       </header>
 
-      {/* Main Canvas Body */}
+      {/* Main Canvas Area */}
       <div className="flex flex-1 relative overflow-hidden">
         <NodePalette />
         <div className="flex-1 h-full relative">
-          <WorkflowCanvas workflowId={workflowId} />
+          <WorkflowCanvas
+            workflowId={workflowId}
+            onNodeClick={(id) => setSelectedNodeId(id)}
+          />
         </div>
+
+        {/* Node Settings Drawer */}
+        <NodeSettingsSheet
+          nodeId={selectedNodeId}
+          onClose={() => setSelectedNodeId(null)}
+        />
       </div>
 
       {/* Execution Logs Drawer */}
