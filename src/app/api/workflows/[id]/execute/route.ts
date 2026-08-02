@@ -20,7 +20,7 @@ export async function POST(
     let nodes = body.nodes;
     let edges = body.edges;
 
-    // Fallback: If nodes or edges were not provided in the request body, load them from Supabase
+    // Fallback to Supabase if nodes or edges are not in request body
     if (!nodes || !edges) {
       try {
         const supabase = await createClient();
@@ -39,7 +39,6 @@ export async function POST(
       }
     }
 
-    // Default to empty arrays if still missing
     nodes = Array.isArray(nodes) ? nodes : [];
     edges = Array.isArray(edges) ? edges : [];
 
@@ -50,8 +49,65 @@ export async function POST(
       );
     }
 
-    // Run execution pipeline
-    const result = await runWorkflowDAG(nodes, edges);
+    // Pre-process Agent system prompts to interpolate {{JOB_DESCRIPTION}} and {{RESUME_TEXT}}
+    const processedNodes = nodes.map((node) => {
+      if (node.type === 'agentNode' || node.type === 'agent') {
+        const incomingEdges = edges.filter((e) => e.target === node.id);
+        const connectedNodes = incomingEdges.map((e) =>
+          nodes.find((n) => n.id === e.source)
+        );
+
+        let jobDescriptionText = '';
+        let resumeText = '';
+        let extraInputs: string[] = [];
+
+        connectedNodes.forEach((connNode) => {
+          if (!connNode) return;
+          const content = connNode.data?.value || connNode.data?.text || '';
+          const title = (connNode.data?.roleName || connNode.data?.title || '').toLowerCase();
+
+          // Match node content or title to classify Job Description vs Resume
+          if (title.includes('job') || title.includes('jd') || content.toLowerCase().includes('job description')) {
+            jobDescriptionText += content + '\n\n';
+          } else if (title.includes('resume') || title.includes('cv') || content.toLowerCase().includes('experience')) {
+            resumeText += content + '\n\n';
+          } else {
+            extraInputs.push(content);
+          }
+        });
+
+        // Fallback: If no clear title matching, assign connected inputs by position
+        if (!jobDescriptionText && connectedNodes[0]) {
+          jobDescriptionText = connectedNodes[0].data?.value || connectedNodes[0].data?.text || '';
+        }
+        if (!resumeText && connectedNodes[1]) {
+          resumeText = connectedNodes[1].data?.value || connectedNodes[1].data?.text || '';
+        }
+
+        let instructions = node.data?.instructions || node.data?.systemPrompt || '';
+
+        // Hydrate variables in system instructions
+        instructions = instructions
+          .replace('{{JOB_DESCRIPTION}}', jobDescriptionText.trim() || '[No Job Description Provided]')
+          .replace('{{RESUME_TEXT}}', resumeText.trim() || '[No Resume Provided]')
+          .replace('{{SENIORITY_LEVEL}}', node.data?.seniority || 'Not Specified (Infer from JD)')
+          .replace('{{INDUSTRY}}', node.data?.industry || 'Not Specified (Infer from JD)');
+
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            instructions,
+            // Pass full hydrated prompt to execution engine
+            userPrompt: extraInputs.length > 0 ? extraInputs.join('\n\n') : 'Evaluate the provided Job Description and Resume according to your system instructions.',
+          },
+        };
+      }
+      return node;
+    });
+
+    // Run execution pipeline with hydrated nodes
+    const result = await runWorkflowDAG(processedNodes, edges);
 
     return NextResponse.json({
       success: true,

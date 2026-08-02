@@ -1,96 +1,91 @@
-import React, { useRef, useState } from 'react';
-import { Handle, Position, NodeProps } from '@xyflow/react';
-import { Textarea } from '@/components/ui/textarea';
-import { FileText, Trash2, Upload, Loader2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Handle, Position } from '@xyflow/react';
+import { FileText, Upload, Maximize2 } from 'lucide-react';
 import { useCanvasStore } from '@/lib/hooks/useCanvasStore';
 
-export function InputNode({ id, data }: NodeProps) {
+export function InputNode({ id, data }: { id: string; data: any }) {
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
-  const deleteNode = useCanvasStore((s) => s.deleteNode);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isUploading, setIsUploading] = useState(false);
+  const [textValue, setTextValue] = useState(data?.value || '');
 
-const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
-
-  const formData = new FormData();
-  formData.append('file', file);
-
-  try {
-    const res = await fetch('/api/parse-pdf', {
-      method: 'POST',
-      body: formData,
-    });
-
-    const data = await res.json();
-
-    if (data.success) {
-      updateNodeData(id, { value: data.text, fileName: data.filename });
-    } else {
-      alert('Upload error: ' + data.error);
+  // Keep local state in sync when nodes load from Supabase on refresh
+  useEffect(() => {
+    if (data?.value !== undefined) {
+      setTextValue(data.value);
     }
-  } catch (err: any) {
-    console.error('File upload error:', err);
-    alert('Failed to parse file.');
-  }
-};  
+  }, [data?.value]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setTextValue(val);
+    // Sync directly to Zustand store so "Save Canvas" gets the latest text
+    updateNodeData(id, { value: val });
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await fetch('/api/parse-pdf', { method: 'POST', body: formData });
+      const result = await res.json();
+      if (result.success) {
+        setTextValue(result.text);
+        updateNodeData(id, { value: result.text, fileName: result.filename });
+      } else {
+        alert('File upload error: ' + (result.error || 'Failed to process file'));
+      }
+    } catch (err) {
+      alert('Failed to parse uploaded file');
+    }
+  };
+
+  const stopPropagation = (e: React.SyntheticEvent) => e.stopPropagation();
 
   return (
-    <div className="w-80 rounded-xl border border-slate-800 bg-slate-950/90 p-4 text-slate-100 backdrop-blur-md shadow-lg">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3 border-b border-slate-800/60 pb-2">
+    <div className="w-80 rounded-xl border border-slate-700/80 bg-slate-900/95 p-3.5 text-white shadow-xl backdrop-blur-md">
+      <div className="mb-2.5 flex items-center justify-between border-b border-slate-800 pb-2">
         <div className="flex items-center gap-2">
-          <FileText className="w-4 h-4 text-emerald-400" />
-          <span className="font-semibold text-sm">{(data as any).label || 'User Input'}</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading}
-            className="text-slate-400 hover:text-emerald-400 p-1 rounded-md hover:bg-slate-800 transition-colors flex items-center gap-1 text-[10px]"
-            title="Upload Local File (.pdf, .txt, .csv, .json)"
-          >
-            {isUploading ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
-            ) : (
-              <Upload className="w-3.5 h-3.5" />
+          <div className="rounded-lg bg-emerald-500/20 p-1.5 text-emerald-400">
+            <FileText className="h-4 w-4" />
+          </div>
+          <div>
+            <h3 className="text-xs font-bold text-slate-100">{data?.title || 'User Input'}</h3>
+            {data?.fileName && (
+              <span className="block max-w-[140px] truncate text-[10px] text-emerald-400">
+                📄 {data.fileName}
+              </span>
             )}
-            Upload
-          </button>
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileUpload}
-            accept="*"
-            className="hidden"
-          />
-
-          <button
-            onClick={() => deleteNode(id)}
-            className="text-slate-500 hover:text-rose-400 p-1 rounded-md hover:bg-slate-800 transition-colors"
-            title="Delete Node"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
+          </div>
         </div>
       </div>
 
-      {/* Input Box */}
-      <div className="space-y-1.5 text-xs">
-        <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider block">
-          Input Text / File Content
-        </label>
-        <Textarea
-          value={(data as any).value || ''}
-          onChange={(e) => updateNodeData(id, { value: e.target.value })}
-          placeholder="Type text here OR click 'Upload' to import a PDF / TXT file..."
-          rows={5}
-          className="bg-slate-900 border-slate-800 text-xs text-slate-200 resize-none font-mono scrollbar-thin"
+      <div className="space-y-2">
+        <textarea
+          value={textValue}
+          onChange={handleChange}
+          onKeyDown={stopPropagation}
+          onKeyUp={stopPropagation}
+          onMouseDown={stopPropagation}
+          onPointerDown={stopPropagation}
+          placeholder="Paste Job Description or Resume here..."
+          className="nodrag nopan h-28 w-full resize-none rounded-md border border-slate-800 bg-slate-950 p-2 text-xs text-slate-300 focus:border-emerald-500/50 focus:outline-none"
         />
+
+        <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1">
+          <span>{textValue.length} characters</span>
+          <label className="flex cursor-pointer items-center gap-1 font-semibold text-emerald-400 hover:underline">
+            <Upload className="h-3 w-3" /> Upload File
+            <input type="file" onChange={handleFileUpload} className="hidden" accept="*" />
+          </label>
+        </div>
       </div>
 
-      <Handle type="source" position={Position.Bottom} className="!bg-emerald-500 !w-3 !h-3" />
+      <Handle type="source" position={Position.Right} className="!bg-emerald-500 !w-3 !h-3" />
     </div>
   );
 }
+
+export default InputNode;

@@ -9,6 +9,7 @@ import { NodeSettingsSheet } from '@/components/canvas/NodeSettingsSheet';
 import { useCanvasStore } from '@/lib/hooks/useCanvasStore';
 import { getLayoutedElements } from '@/lib/utils/layout';
 import { Play, Save, LayoutGrid, Terminal, Download, Upload } from 'lucide-react';
+import { ReactFlowProvider } from '@xyflow/react'; 
 
 interface CanvasWrapperProps {
   workflowId: string;
@@ -95,7 +96,7 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
       const res = await fetch(`/api/workflows/${workflowId}/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input_data: 'Start initial workflow execution.' }),
+        body: JSON.stringify({ nodes, edges }),
       });
 
       const resText = await res.text();
@@ -110,7 +111,7 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
         throw new Error(result.error || 'Workflow execution failed');
       }
 
-      setActiveRunId(result.runId);
+      setActiveRunId(result.workflowId);
       const outputs: Record<string, string> = result.outputs || {};
 
       safeNodes.forEach((node) => {
@@ -134,106 +135,108 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
-      {/* Top Toolbar */}
-      <header className="h-14 border-b border-slate-800 bg-slate-950/80 px-4 flex items-center justify-between z-10 backdrop-blur-md">
-        <div className="flex items-center gap-3">
-          <span className="font-semibold text-sm tracking-wide text-slate-200">
-            Canvas Workspace
-          </span>
-        </div>
+    <ReactFlowProvider>
+      <div className="flex flex-col h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
+        {/* Top Toolbar */}
+        <header className="h-14 border-b border-slate-800 bg-slate-950/80 px-4 flex items-center justify-between z-10 backdrop-blur-md">
+          <div className="flex items-center gap-3">
+            <span className="font-semibold text-sm tracking-wide text-slate-200">
+              Canvas Workspace
+            </span>
+          </div>
 
-        <div className="flex items-center gap-2">
-          {/* Auto Layout */}
-          <Button
-            onClick={handleAutoLayout}
-            size="sm"
-            variant="outline"
-            className="border-slate-800 text-slate-300 hover:bg-slate-900 text-xs flex items-center gap-1.5"
-            title="Auto-arrange canvas nodes"
-          >
-            <LayoutGrid className="w-3.5 h-3.5 text-amber-400" /> Auto Layout
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* Auto Layout */}
+            <Button
+              onClick={handleAutoLayout}
+              size="sm"
+              variant="outline"
+              className="border-slate-800 text-slate-300 hover:bg-slate-900 text-xs flex items-center gap-1.5"
+              title="Auto-arrange canvas nodes"
+            >
+              <LayoutGrid className="w-3.5 h-3.5 text-amber-400" /> Auto Layout
+            </Button>
 
-          {/* Export JSON */}
-          <Button
-            onClick={handleExportJSON}
-            size="sm"
-            variant="outline"
-            className="border-slate-800 text-slate-300 hover:bg-slate-900 text-xs flex items-center gap-1.5"
-          >
-            <Download className="w-3.5 h-3.5 text-emerald-400" /> Export
-          </Button>
+            {/* Export JSON */}
+            <Button
+              onClick={handleExportJSON}
+              size="sm"
+              variant="outline"
+              className="border-slate-800 text-slate-300 hover:bg-slate-900 text-xs flex items-center gap-1.5"
+            >
+              <Download className="w-3.5 h-3.5 text-emerald-400" /> Export
+            </Button>
 
-          {/* Import JSON */}
-          <label className="cursor-pointer">
-            <input
-              type="file"
-              accept=".json"
-              onChange={handleImportJSON}
-              className="hidden"
+            {/* Import JSON */}
+            <label className="cursor-pointer">
+              <input
+                type="file"
+                accept=".json"
+                onChange={handleImportJSON}
+                className="hidden"
+              />
+              <div className="border border-slate-800 text-slate-300 hover:bg-slate-900 text-xs px-3 py-1.5 rounded-md flex items-center gap-1.5 font-medium transition-colors">
+                <Upload className="w-3.5 h-3.5 text-cyan-400" /> Import
+              </div>
+            </label>
+
+            {/* Save Button */}
+            <Button
+              onClick={handleSaveCanvas}
+              size="sm"
+              variant="outline"
+              className="border-slate-800 text-slate-300 hover:bg-slate-900 text-xs flex items-center gap-1.5"
+            >
+              <Save className="w-3.5 h-3.5 text-blue-400" /> Save Canvas
+            </Button>
+
+            {/* Logs Button */}
+            <Button
+              onClick={() => setIsLogsOpen(true)}
+              size="sm"
+              variant="outline"
+              className="border-slate-800 text-slate-300 hover:bg-slate-900 text-xs flex items-center gap-1.5"
+            >
+              <Terminal className="w-3.5 h-3.5 text-purple-400" /> Logs
+            </Button>
+
+            {/* Run Workflow */}
+            <Button
+              onClick={handleRunWorkflow}
+              disabled={isRunning}
+              size="sm"
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center gap-1.5 px-4"
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+              {isRunning ? 'Running...' : 'Run Workflow'}
+            </Button>
+          </div>
+        </header>
+
+        {/* Main Canvas Area */}
+        <div className="flex flex-1 relative overflow-hidden">
+          <NodePalette />
+          <div className="flex-1 h-full relative">
+            <WorkflowCanvas
+              workflowId={workflowId}
+              onNodeClick={(id) => setSelectedNodeId(id)}
             />
-            <div className="border border-slate-800 text-slate-300 hover:bg-slate-900 text-xs px-3 py-1.5 rounded-md flex items-center gap-1.5 font-medium transition-colors">
-              <Upload className="w-3.5 h-3.5 text-cyan-400" /> Import
-            </div>
-          </label>
+          </div>
 
-          {/* Save Button */}
-          <Button
-            onClick={handleSaveCanvas}
-            size="sm"
-            variant="outline"
-            className="border-slate-800 text-slate-300 hover:bg-slate-900 text-xs flex items-center gap-1.5"
-          >
-            <Save className="w-3.5 h-3.5 text-blue-400" /> Save Canvas
-          </Button>
-
-          {/* Logs Button */}
-          <Button
-            onClick={() => setIsLogsOpen(true)}
-            size="sm"
-            variant="outline"
-            className="border-slate-800 text-slate-300 hover:bg-slate-900 text-xs flex items-center gap-1.5"
-          >
-            <Terminal className="w-3.5 h-3.5 text-purple-400" /> Logs
-          </Button>
-
-          {/* Run Workflow */}
-          <Button
-            onClick={handleRunWorkflow}
-            disabled={isRunning}
-            size="sm"
-            className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center gap-1.5 px-4"
-          >
-            <Play className="w-3.5 h-3.5 fill-current" />
-            {isRunning ? 'Running...' : 'Run Workflow'}
-          </Button>
-        </div>
-      </header>
-
-      {/* Main Canvas Area */}
-      <div className="flex flex-1 relative overflow-hidden">
-        <NodePalette />
-        <div className="flex-1 h-full relative">
-          <WorkflowCanvas
-            workflowId={workflowId}
-            onNodeClick={(id) => setSelectedNodeId(id)}
+          {/* Node Settings Drawer */}
+          <NodeSettingsSheet
+            nodeId={selectedNodeId}
+            onClose={() => setSelectedNodeId(null)}
           />
         </div>
 
-        {/* Node Settings Drawer */}
-        <NodeSettingsSheet
-          nodeId={selectedNodeId}
-          onClose={() => setSelectedNodeId(null)}
+        {/* Execution Logs Drawer */}
+        <ExecutionLogsSheet
+          isOpen={isLogsOpen}
+          onClose={() => setIsLogsOpen(false)}
+          runId={activeRunId}
         />
       </div>
-
-      {/* Execution Logs Drawer */}
-      <ExecutionLogsSheet
-        isOpen={isLogsOpen}
-        onClose={() => setIsLogsOpen(false)}
-        runId={activeRunId}
-      />
-    </div>
+    </ReactFlowProvider>
   );
 }
