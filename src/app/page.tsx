@@ -1,31 +1,31 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Plus, Trash2, Bot } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Network, Plus, Layers, Bot, ArrowRight, Loader2 } from 'lucide-react';
 
-interface Workflow {
+interface WorkflowItem {
   id: string;
-  name: string;
-  nodes?: any[];
-  updated_at?: string;
+  name?: string;
   created_at?: string;
+  nodes?: any[];
 }
 
-export default function DashboardPage() {
-  const router = useRouter();
-  const [workflows, setWorkflows] = useState<Workflow[]>([]);
+export default function HomePage() {
+  const [workflows, setWorkflows] = useState<WorkflowItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const router = useRouter();
 
-  // Fetch all workflows from API
+  // Fetch workflows from your existing working API route
   const fetchWorkflows = async () => {
     try {
       const res = await fetch('/api/workflows');
       if (res.ok) {
         const data = await res.json();
-        setWorkflows(data.workflows || []);
+        const list = Array.isArray(data) ? data : data.workflows || [];
+        setWorkflows(list);
       }
     } catch (err) {
       console.error('Failed to fetch workflows:', err);
@@ -38,18 +38,23 @@ export default function DashboardPage() {
     fetchWorkflows();
   }, []);
 
-  // Create new workflow
-  const handleCreate = async () => {
+  const handleCreateWorkflow = async () => {
     setCreating(true);
     try {
       const res = await fetch('/api/workflows', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'New Multi-Agent Workflow' }),
+        body: JSON.stringify({
+          name: 'New Multi-Agent Workflow',
+          nodes: [],
+          edges: [],
+        }),
       });
       const data = await res.json();
-      if (data.workflow?.id) {
-        router.push(`/workflows/${data.workflow.id}`);
+      const newId = data?.id || data?.workflow?.id;
+
+      if (newId) {
+        router.push(`/workflows/${newId}`);
       }
     } catch (err) {
       console.error('Failed to create workflow:', err);
@@ -58,110 +63,97 @@ export default function DashboardPage() {
     }
   };
 
-  // Delete workflow card
-  const handleDelete = async (e: React.MouseEvent, id: string, name: string) => {
-    e.stopPropagation(); // Prevents navigating into the canvas
-
-    if (!confirm(`Are you sure you want to delete "${name || 'this workflow'}"?`)) {
-      return;
-    }
-
-    try {
-      const res = await fetch(`/api/workflows/${id}`, {
-        method: 'DELETE',
-      });
-
-      if (res.ok) {
-        setWorkflows((prev) => prev.filter((w) => w.id !== id));
-      } else {
-        alert('Failed to delete workflow');
-      }
-    } catch (err) {
-      console.error('Delete failed:', err);
-    }
-  };
-
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 p-8 font-sans">
-      <div className="max-w-5xl mx-auto flex flex-col gap-8">
+    <div className="min-h-screen bg-slate-950 text-slate-100 p-8 font-sans">
+      <div className="max-w-6xl mx-auto space-y-8">
         {/* Header */}
-        <header className="flex items-center justify-between border-b border-slate-800 pb-6">
+        <div className="flex items-center justify-between border-b border-slate-800/80 pb-6">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight text-white">
-              AI Agent Workflows
+            <h1 className="text-2xl font-bold flex items-center gap-2.5 text-white">
+              <Network className="h-6 w-6 text-blue-400" /> Multi-Agent Workflows
             </h1>
-            <p className="text-sm text-slate-400 mt-1">
-              Build, chain, and monitor multi-agent execution pipelines in real time.
+            <p className="text-xs text-slate-400 mt-1">
+              Manage and monitor all your deployed agent pipelines.
             </p>
           </div>
-          <Button
-            onClick={handleCreate}
-            disabled={creating}
-            className="bg-blue-600 hover:bg-blue-500 text-white font-medium flex items-center gap-2 px-5 py-2.5 rounded-xl transition-all"
-          >
-            <Plus className="w-4 h-4" />
-            {creating ? 'Creating...' : 'Create Workflow'}
-          </Button>
-        </header>
 
-        {/* Workflows List Grid */}
+          <button
+            onClick={handleCreateWorkflow}
+            disabled={creating}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold text-xs px-4 py-2.5 rounded-lg shadow-lg shadow-blue-500/20 transition-all cursor-pointer"
+          >
+            {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            <span>{creating ? 'Creating...' : 'Create New Workflow'}</span>
+          </button>
+        </div>
+
+        {/* Loading / Cards Grid */}
         {loading ? (
-          <div className="text-sm text-slate-500 py-12 text-center">Loading workflows...</div>
-        ) : workflows.length === 0 ? (
-          <div className="text-center py-16 border border-dashed border-slate-800 rounded-2xl">
-            <p className="text-slate-400 text-sm">No workflows created yet.</p>
-            <Button
-              onClick={handleCreate}
-              variant="outline"
-              className="mt-4 border-slate-700 text-slate-300"
-            >
-              Create your first workflow
-            </Button>
+          <div className="flex items-center justify-center h-64 text-slate-500 gap-2 text-sm">
+            <Loader2 className="h-5 w-5 animate-spin text-blue-400" />
+            <span>Loading workflows...</span>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {workflows.map((wf) => {
-              const nodeCount = Array.isArray(wf.nodes) ? wf.nodes.length : 0;
-              const formattedDate = wf.updated_at
-                ? new Date(wf.updated_at).toLocaleDateString()
-                : 'Recently';
+              const nodesArr = Array.isArray(wf.nodes) ? wf.nodes : [];
+              const nodeCount = nodesArr.length;
+              const agentCount = nodesArr.filter(
+                (n: any) => n.type === 'agent' || n.type === 'agentNode'
+              ).length;
+              const formattedDate = wf.created_at
+                ? new Date(wf.created_at).toLocaleDateString()
+                : new Date().toLocaleDateString();
 
               return (
                 <div
                   key={wf.id}
-                  onClick={() => router.push(`/workflows/${wf.id}`)}
-                  className="group flex items-center justify-between p-5 rounded-2xl border border-slate-800/80 bg-slate-900/60 hover:bg-slate-900 hover:border-blue-500/40 cursor-pointer transition-all shadow-sm"
+                  className="rounded-xl border border-slate-800/90 bg-slate-900/60 p-5 flex flex-col justify-between space-y-5 hover:border-slate-700 transition-all group"
                 >
-                  <div className="flex items-start gap-4">
-                    <div className="p-3 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                      <Bot className="w-5 h-5" />
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-[10px] font-mono tracking-wider bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20">
+                        WORKFLOW ID: {wf.id.slice(0, 8).toUpperCase()}
+                      </span>
+                      <span className="text-[10px] text-slate-500">{formattedDate}</span>
                     </div>
-                    <div>
-                      <h3 className="font-semibold text-slate-100 group-hover:text-blue-400 transition-colors">
-                        {wf.name || 'New Multi-Agent Workflow'}
-                      </h3>
-                      <p className="text-xs text-slate-400 mt-1">Chained AI processing pipeline</p>
-                      <div className="flex items-center gap-4 mt-3 text-[11px] text-slate-500">
-                        <span>{nodeCount} nodes</span>
-                        <span>•</span>
-                        <span>{formattedDate}</span>
+
+                    <h2 className="text-sm font-bold text-slate-100 group-hover:text-blue-400 transition-colors">
+                      {wf.name || 'New Multi-Agent Workflow'}
+                    </h2>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 bg-slate-950/80 p-3 rounded-lg border border-slate-800/80 text-xs">
+                    <div className="flex items-center gap-2.5">
+                      <Layers className="h-4 w-4 text-emerald-400" />
+                      <div>
+                        <span className="block text-slate-500 text-[10px]">Total Nodes</span>
+                        <span className="font-bold text-slate-200">{nodeCount} Nodes</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2.5">
+                      <Bot className="h-4 w-4 text-blue-400" />
+                      <div>
+                        <span className="block text-slate-500 text-[10px]">Agents</span>
+                        <span className="font-bold text-slate-200">{agentCount} Agents</span>
                       </div>
                     </div>
                   </div>
 
-                  <button
-                    onClick={(e) => handleDelete(e, wf.id, wf.name)}
-                    className="p-2.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all opacity-0 group-hover:opacity-100"
-                    title="Delete Workflow"
+                  <Link
+                    href={`/workflows/${wf.id}`}
+                    className="flex items-center justify-between w-full text-xs font-semibold text-slate-300 hover:text-white pt-2 border-t border-slate-800/60 transition-colors"
                   >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                    <span>Open Canvas</span>
+                    <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform text-slate-400 group-hover:text-white" />
+                  </Link>
                 </div>
               );
             })}
           </div>
         )}
       </div>
-    </main>
+    </div>
   );
 }

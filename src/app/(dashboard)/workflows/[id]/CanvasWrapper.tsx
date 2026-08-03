@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { WorkflowCanvas } from '@/components/canvas/WorkflowCanvas';
 import { NodePalette } from '@/components/canvas/NodePalette';
@@ -8,8 +9,17 @@ import { ExecutionLogsSheet } from '@/components/canvas/ExecutionLogsSheet';
 import { NodeSettingsSheet } from '@/components/canvas/NodeSettingsSheet';
 import { useCanvasStore } from '@/lib/hooks/useCanvasStore';
 import { getLayoutedElements } from '@/lib/utils/layout';
-import { Play, Save, LayoutGrid, Terminal, Download, Upload } from 'lucide-react';
-import { ReactFlowProvider } from '@xyflow/react'; 
+import {
+  Play,
+  Save,
+  LayoutGrid,
+  Terminal,
+  Download,
+  Upload,
+  PanelLeft,
+  ArrowLeft,
+} from 'lucide-react';
+import { ReactFlowProvider } from '@xyflow/react';
 
 interface CanvasWrapperProps {
   workflowId: string;
@@ -20,6 +30,9 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
   const [isLogsOpen, setIsLogsOpen] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+
+  // Toggle state for collapsing Node Palette sidebar
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   // Zustand Store
   const nodes = useCanvasStore((s) => s.nodes);
@@ -139,25 +152,57 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
       <div className="flex flex-col h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
         {/* Top Toolbar */}
         <header className="h-14 border-b border-slate-800 bg-slate-950/80 px-4 flex items-center justify-between z-10 backdrop-blur-md">
+          {/* Left Controls */}
           <div className="flex items-center gap-3">
+            {/* Navigates back to main dashboard (/) */}
+            <Link href="/">
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-slate-800 text-slate-300 hover:bg-slate-900 text-xs flex items-center gap-1.5"
+                title="Go to main dashboard"
+              >
+                <ArrowLeft className="w-3.5 h-3.5 text-slate-400" />
+                <span>Dashboard</span>
+              </Button>
+            </Link>
+
+            <div className="h-4 w-[1px] bg-slate-800" />
+
+            {/* Hamburger / Sidebar Toggle Button */}
+            <Button
+              onClick={() => setIsSidebarOpen((prev) => !prev)}
+              size="sm"
+              variant="outline"
+              className={`border-slate-800 text-xs flex items-center gap-1.5 transition-colors ${
+                isSidebarOpen
+                  ? 'bg-blue-500/10 text-blue-400 border-blue-500/30'
+                  : 'text-slate-300 hover:bg-slate-900'
+              }`}
+              title={isSidebarOpen ? 'Hide Node Palette' : 'Show Node Palette'}
+            >
+              <PanelLeft className="w-3.5 h-3.5" />
+              <span>{isSidebarOpen ? 'Hide Panel' : 'Show Panel'}</span>
+            </Button>
+
+            <div className="h-4 w-[1px] bg-slate-800" />
+
             <span className="font-semibold text-sm tracking-wide text-slate-200">
               Canvas Workspace
             </span>
           </div>
 
+          {/* Right Toolbar Actions */}
           <div className="flex items-center gap-2">
-            {/* Auto Layout */}
             <Button
               onClick={handleAutoLayout}
               size="sm"
               variant="outline"
               className="border-slate-800 text-slate-300 hover:bg-slate-900 text-xs flex items-center gap-1.5"
-              title="Auto-arrange canvas nodes"
             >
               <LayoutGrid className="w-3.5 h-3.5 text-amber-400" /> Auto Layout
             </Button>
 
-            {/* Export JSON */}
             <Button
               onClick={handleExportJSON}
               size="sm"
@@ -167,7 +212,6 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
               <Download className="w-3.5 h-3.5 text-emerald-400" /> Export
             </Button>
 
-            {/* Import JSON */}
             <label className="cursor-pointer">
               <input
                 type="file"
@@ -180,7 +224,6 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
               </div>
             </label>
 
-            {/* Save Button */}
             <Button
               onClick={handleSaveCanvas}
               size="sm"
@@ -190,7 +233,6 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
               <Save className="w-3.5 h-3.5 text-blue-400" /> Save Canvas
             </Button>
 
-            {/* Logs Button */}
             <Button
               onClick={() => setIsLogsOpen(true)}
               size="sm"
@@ -200,7 +242,6 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
               <Terminal className="w-3.5 h-3.5 text-purple-400" /> Logs
             </Button>
 
-            {/* Run Workflow */}
             <Button
               onClick={handleRunWorkflow}
               disabled={isRunning}
@@ -215,7 +256,18 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
 
         {/* Main Canvas Area */}
         <div className="flex flex-1 relative overflow-hidden">
-          <NodePalette />
+          {/* Collapsible Node Palette */}
+          <div
+            className={`transition-all duration-300 ease-in-out border-r border-slate-800 bg-slate-950 z-10 ${
+              isSidebarOpen ? 'w-64 opacity-100' : 'w-0 opacity-0 overflow-hidden border-none'
+            }`}
+          >
+            <div className="w-64 h-full">
+              <NodePalette />
+            </div>
+          </div>
+
+          {/* Workflow Canvas */}
           <div className="flex-1 h-full relative">
             <WorkflowCanvas
               workflowId={workflowId}
@@ -223,14 +275,12 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
             />
           </div>
 
-          {/* Node Settings Drawer */}
           <NodeSettingsSheet
             nodeId={selectedNodeId}
             onClose={() => setSelectedNodeId(null)}
           />
         </div>
 
-        {/* Execution Logs Drawer */}
         <ExecutionLogsSheet
           isOpen={isLogsOpen}
           onClose={() => setIsLogsOpen(false)}
