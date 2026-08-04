@@ -28,6 +28,9 @@ export async function POST(req: Request) {
     const name = body.name || 'New Multi-Agent Workflow';
     const supabase = await createClient();
 
+    // Optional: Get authenticated user if using Supabase Auth
+    const { data: { user } } = await supabase.auth.getUser();
+
     const { data, error } = await supabase
       .from('workflows')
       .insert([
@@ -35,6 +38,7 @@ export async function POST(req: Request) {
           name,
           nodes: [],
           edges: [],
+          ...(user ? { user_id: user.id } : {}), // Binds to user if auth is active
         },
       ])
       .select()
@@ -44,7 +48,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ workflow: data });
+    return NextResponse.json({ workflow: data }, { status: 201 });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

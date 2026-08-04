@@ -31,7 +31,6 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
 
-  // Toggle state for collapsing Node Palette sidebar
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   // Zustand Store
@@ -99,8 +98,9 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
 
     const safeNodes = Array.isArray(nodes) ? nodes : [];
 
+    // Mark agent nodes as RUNNING
     safeNodes.forEach((node) => {
-      if (node.type === 'agent') {
+      if (node.type === 'agent' || node.type === 'agentNode') {
         updateNodeData(node.id, { status: 'RUNNING' });
       }
     });
@@ -125,20 +125,30 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
       }
 
       setActiveRunId(result.workflowId);
-      const outputs: Record<string, string> = result.outputs || {};
 
-      safeNodes.forEach((node) => {
-        if (node.type === 'agent' || node.type === 'output') {
-          updateNodeData(node.id, {
-            status: 'SUCCESS',
-            output: outputs[node.id] || 'Step completed successfully.',
-          });
-        }
-      });
+      // Replace nodes with updated execution results returned from server
+      if (Array.isArray(result.nodes) && result.nodes.length > 0) {
+        setNodes(result.nodes);
+      } else {
+        const outputs: Record<string, string> = result.outputs || {};
+        safeNodes.forEach((node) => {
+          if (
+            node.type === 'agent' ||
+            node.type === 'agentNode' ||
+            node.type === 'output' ||
+            node.type === 'outputNode'
+          ) {
+            updateNodeData(node.id, {
+              status: 'SUCCESS',
+              output: outputs[node.id] || 'Step completed successfully.',
+            });
+          }
+        });
+      }
     } catch (err: any) {
       console.error('Workflow Execution Error:', err);
       safeNodes.forEach((node) => {
-        if (node.type === 'agent') {
+        if (node.type === 'agent' || node.type === 'agentNode') {
           updateNodeData(node.id, { status: 'FAILED' });
         }
       });
@@ -152,9 +162,7 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
       <div className="flex flex-col h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
         {/* Top Toolbar */}
         <header className="h-14 border-b border-slate-800 bg-slate-950/80 px-4 flex items-center justify-between z-10 backdrop-blur-md">
-          {/* Left Controls */}
           <div className="flex items-center gap-3">
-            {/* Navigates back to main dashboard (/) */}
             <Link href="/">
               <Button
                 size="sm"
@@ -169,7 +177,6 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
 
             <div className="h-4 w-[1px] bg-slate-800" />
 
-            {/* Hamburger / Sidebar Toggle Button */}
             <Button
               onClick={() => setIsSidebarOpen((prev) => !prev)}
               size="sm"
@@ -256,7 +263,6 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
 
         {/* Main Canvas Area */}
         <div className="flex flex-1 relative overflow-hidden">
-          {/* Collapsible Node Palette */}
           <div
             className={`transition-all duration-300 ease-in-out border-r border-slate-800 bg-slate-950 z-10 ${
               isSidebarOpen ? 'w-64 opacity-100' : 'w-0 opacity-0 overflow-hidden border-none'
@@ -267,7 +273,6 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
             </div>
           </div>
 
-          {/* Workflow Canvas */}
           <div className="flex-1 h-full relative">
             <WorkflowCanvas
               workflowId={workflowId}

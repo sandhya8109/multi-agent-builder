@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useRef, useEffect } from 'react';
+import React, { useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   ReactFlow,
   Background,
@@ -20,19 +20,12 @@ import { OutputNode } from './custom-nodes/OutputNode';
 import { ApiNode } from './custom-nodes/ApiNode';
 import { RAGNode } from './custom-nodes/RAGNode';
 
-const nodeTypes = {
-  agent: AgentNode,
-  input: InputNode,
-  output: OutputNode,
-  api: ApiNode,
-  rag: RAGNode,
-};
-
 interface WorkflowCanvasProps {
   workflowId: string;
+  onNodeClick?: (id: string) => void;
 }
 
-function InnerWorkflowCanvas({ workflowId }: WorkflowCanvasProps) {
+function InnerWorkflowCanvas({ workflowId, onNodeClick }: WorkflowCanvasProps) {
   const {
     nodes,
     edges,
@@ -46,6 +39,24 @@ function InnerWorkflowCanvas({ workflowId }: WorkflowCanvasProps) {
 
   const isInitialized = useRef(false);
   const { screenToFlowPosition } = useReactFlow();
+
+  // Memoize nodeTypes to fix React Flow warning #002
+  const nodeTypes = useMemo(
+    () => ({
+      agent: AgentNode,
+      agentNode: AgentNode,
+      input: InputNode,
+      inputNode: InputNode,
+      output: OutputNode,
+      outputNode: OutputNode,
+      api: ApiNode,
+      apiNode: ApiNode,
+      apiFetcher: ApiNode,
+      rag: RAGNode,
+      ragNode: RAGNode,
+    }),
+    []
+  );
 
   // Load saved workflow state on mount
   useEffect(() => {
@@ -69,7 +80,7 @@ function InnerWorkflowCanvas({ workflowId }: WorkflowCanvasProps) {
     loadCanvas();
   }, [workflowId, setNodes, setEdges]);
 
-  // Handle Drag & Drop Node Creation from NodePalette
+  // Handle Drag & Drop Node Creation
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
@@ -91,7 +102,12 @@ function InnerWorkflowCanvas({ workflowId }: WorkflowCanvasProps) {
         id: `node_${type}_${Date.now()}`,
         type,
         position,
-        data: { label: `${type.toUpperCase()} Node` },
+        data: {
+          label: `${type.toUpperCase()} Node`,
+          instructions: 'You are a helpful assistant.',
+          model: 'llama-3.1-8b-instant',
+          temperature: 0.3,
+        },
       };
 
       addNode(newNode);
@@ -108,6 +124,7 @@ function InnerWorkflowCanvas({ workflowId }: WorkflowCanvasProps) {
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         nodeTypes={nodeTypes}
+        onNodeClick={(_, node) => onNodeClick?.(node.id)}
         fitView
         colorMode="dark"
       >
