@@ -1,14 +1,16 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { WorkflowCanvas } from '@/components/canvas/WorkflowCanvas';
 import { NodePalette } from '@/components/canvas/NodePalette';
 import { ExecutionLogsSheet } from '@/components/canvas/ExecutionLogsSheet';
 import { NodeSettingsSheet } from '@/components/canvas/NodeSettingsSheet';
+import { TemplateModal } from '@/components/canvas/TemplateModal';
 import { useCanvasStore } from '@/lib/hooks/useCanvasStore';
 import { getLayoutedElements } from '@/lib/utils/layout';
+import { WorkflowTemplate } from '@/lib/constants/templates';
 import {
   Play,
   Save,
@@ -18,6 +20,8 @@ import {
   Upload,
   PanelLeft,
   ArrowLeft,
+  LayoutTemplate,
+  Loader2,
 } from 'lucide-react';
 import { ReactFlowProvider } from '@xyflow/react';
 
@@ -26,11 +30,12 @@ interface CanvasWrapperProps {
 }
 
 export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
+  const [isLoading, setIsLoading] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
-
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   // Zustand Store
@@ -39,6 +44,38 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
   const setNodes = useCanvasStore((s) => s.setNodes);
   const setEdges = useCanvasStore((s) => s.setEdges);
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+
+  // Fetch Workflow Data on Mount
+  useEffect(() => {
+    if (!workflowId) return;
+
+    const fetchWorkflow = async () => {
+      setIsLoading(true);
+      try {
+        const res = await fetch(`/api/workflows/${workflowId}`);
+        if (res.ok) {
+          const data = await res.json();
+          setNodes(data.nodes || []);
+          setEdges(data.edges || []);
+        } else {
+          console.error('Failed to load workflow data from database');
+        }
+      } catch (err) {
+        console.error('Error fetching workflow details:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchWorkflow();
+  }, [workflowId, setNodes, setEdges]);
+
+  // Load Template directly into canvas
+  const handleLoadTemplate = (template: WorkflowTemplate) => {
+    setNodes(template.nodes || []);
+    setEdges(template.edges || []);
+    setIsTemplateModalOpen(false);
+  };
 
   // Auto Layout
   const handleAutoLayout = () => {
@@ -126,7 +163,6 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
 
       setActiveRunId(result.workflowId);
 
-      // Replace nodes with updated execution results returned from server
       if (Array.isArray(result.nodes) && result.nodes.length > 0) {
         setNodes(result.nodes);
       } else {
@@ -156,6 +192,15 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
       setIsRunning(false);
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-slate-950 text-slate-400 gap-3">
+        <Loader2 className="h-7 w-7 animate-spin text-blue-500" />
+        <span className="text-sm font-medium">Loading canvas state...</span>
+      </div>
+    );
+  }
 
   return (
     <ReactFlowProvider>
@@ -201,6 +246,15 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
 
           {/* Right Toolbar Actions */}
           <div className="flex items-center gap-2">
+            <Button
+              onClick={() => setIsTemplateModalOpen(true)}
+              size="sm"
+              variant="outline"
+              className="border-slate-800 text-slate-300 hover:bg-slate-900 text-xs flex items-center gap-1.5"
+            >
+              <LayoutTemplate className="w-3.5 h-3.5 text-blue-400" /> Templates
+            </Button>
+
             <Button
               onClick={handleAutoLayout}
               size="sm"
@@ -290,6 +344,12 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
           isOpen={isLogsOpen}
           onClose={() => setIsLogsOpen(false)}
           runId={activeRunId}
+        />
+
+        <TemplateModal
+          isOpen={isTemplateModalOpen}
+          onClose={() => setIsTemplateModalOpen(false)}
+          onSelectTemplate={handleLoadTemplate}
         />
       </div>
     </ReactFlowProvider>

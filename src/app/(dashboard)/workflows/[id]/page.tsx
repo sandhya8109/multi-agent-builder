@@ -1,13 +1,11 @@
 import CanvasWrapper from './CanvasWrapper';
 
-interface PageProps {
-  params: Promise<{
-    id: string;
-  }>;
-}
+export default async function WorkflowPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const resolvedParams = await params;
 
-export default async function WorkflowCanvasPage({ params }: PageProps) {
-  const { id } = await params;
-
-  return <CanvasWrapper workflowId={id} />;
+  return <CanvasWrapper workflowId={resolvedParams.id} />;
 }

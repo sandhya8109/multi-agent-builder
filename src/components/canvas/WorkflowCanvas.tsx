@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useRef, useEffect, useMemo } from 'react';
+import React, { useCallback, useRef, useEffect } from 'react';
 import {
   ReactFlow,
   Background,
@@ -19,6 +19,21 @@ import { InputNode } from './custom-nodes/InputNode';
 import { OutputNode } from './custom-nodes/OutputNode';
 import { ApiNode } from './custom-nodes/ApiNode';
 import { RAGNode } from './custom-nodes/RAGNode';
+
+// Registered with full aliases so any drag-and-drop node key maps correctly
+const nodeTypes = {
+  agent: AgentNode,
+  agentNode: AgentNode,
+  input: InputNode,
+  inputNode: InputNode,
+  output: OutputNode,
+  outputNode: OutputNode,
+  api: ApiNode,
+  apiNode: ApiNode,
+  apiFetcher: ApiNode,
+  rag: RAGNode,
+  ragNode: RAGNode,
+};
 
 interface WorkflowCanvasProps {
   workflowId: string;
@@ -39,24 +54,6 @@ function InnerWorkflowCanvas({ workflowId, onNodeClick }: WorkflowCanvasProps) {
 
   const isInitialized = useRef(false);
   const { screenToFlowPosition } = useReactFlow();
-
-  // Memoize nodeTypes to fix React Flow warning #002
-  const nodeTypes = useMemo(
-    () => ({
-      agent: AgentNode,
-      agentNode: AgentNode,
-      input: InputNode,
-      inputNode: InputNode,
-      output: OutputNode,
-      outputNode: OutputNode,
-      api: ApiNode,
-      apiNode: ApiNode,
-      apiFetcher: ApiNode,
-      rag: RAGNode,
-      ragNode: RAGNode,
-    }),
-    []
-  );
 
   // Load saved workflow state on mount
   useEffect(() => {

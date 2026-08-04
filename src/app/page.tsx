@@ -3,7 +3,9 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Network, Plus, Layers, Bot, ArrowRight, Loader2 } from 'lucide-react';
+import { Network, Plus, Layers, Bot, ArrowRight, Loader2, LayoutTemplate, Trash2 } from 'lucide-react';
+import { TemplateModal } from '@/components/canvas/TemplateModal';
+import { WorkflowTemplate } from '@/lib/constants/templates';
 
 interface WorkflowItem {
   id: string;
@@ -11,14 +13,13 @@ interface WorkflowItem {
   created_at?: string;
   nodes?: any[];
 }
-
 export default function HomePage() {
   const [workflows, setWorkflows] = useState<WorkflowItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const router = useRouter();
 
-  // Fetch workflows from your existing working API route
   const fetchWorkflows = async () => {
     try {
       const res = await fetch('/api/workflows');
@@ -38,28 +39,78 @@ export default function HomePage() {
     fetchWorkflows();
   }, []);
 
-  const handleCreateWorkflow = async () => {
-    setCreating(true);
-    try {
-      const res = await fetch('/api/workflows', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'New Multi-Agent Workflow',
-          nodes: [],
-          edges: [],
-        }),
-      });
-      const data = await res.json();
-      const newId = data?.id || data?.workflow?.id;
+const handleCreateWorkflow = async () => {
+  setCreating(true);
+  try {
+    const res = await fetch('/api/workflows', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'New Multi-Agent Workflow',
+        nodes: [],
+        edges: [],
+      }),
+    });
 
-      if (newId) {
-        router.push(`/workflows/${newId}`);
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      console.error('Failed to create workflow:', errorData);
+      return;
+    }
+
+    const data = await res.json();
+    if (data?.id) {
+      router.push(`/workflows/${data.id}`);
+    }
+  } catch (err) {
+    console.error('Failed to create workflow:', err);
+  } finally {
+    setCreating(false);
+  }
+};
+
+const handleCreateFromTemplate = async (template: WorkflowTemplate) => {
+  setCreating(true);
+  try {
+    const res = await fetch('/api/workflows', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: template.name || template.title,
+        nodes: template.nodes || [],
+        edges: template.edges || [],
+      }),
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      console.error('Failed to create workflow from template:', errorData);
+      return;
+    }
+
+    const data = await res.json();
+    if (data?.id) {
+      router.push(`/workflows/${data.id}`);
+    }
+  } catch (err) {
+    console.error('Failed to create workflow from template:', err);
+  } finally {
+    setCreating(false);
+  }
+};
+  const handleDeleteWorkflow = async (id: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!confirm('Are you sure you want to delete this workflow?')) return;
+
+    try {
+      const res = await fetch(`/api/workflows?id=${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setWorkflows((prev) => prev.filter((w) => w.id !== id));
       }
     } catch (err) {
-      console.error('Failed to create workflow:', err);
-    } finally {
-      setCreating(false);
+      console.error('Failed to delete workflow:', err);
     }
   };
 
@@ -77,17 +128,28 @@ export default function HomePage() {
             </p>
           </div>
 
-          <button
-            onClick={handleCreateWorkflow}
-            disabled={creating}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold text-xs px-4 py-2.5 rounded-lg shadow-lg shadow-blue-500/20 transition-all cursor-pointer"
-          >
-            {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            <span>{creating ? 'Creating...' : 'Create New Workflow'}</span>
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsTemplateModalOpen(true)}
+              disabled={creating}
+              className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 disabled:opacity-50 text-slate-200 font-semibold text-xs px-4 py-2.5 rounded-lg transition-all cursor-pointer"
+            >
+              <LayoutTemplate className="h-4 w-4 text-blue-400" />
+              <span>Browse Templates</span>
+            </button>
+
+            <button
+              onClick={handleCreateWorkflow}
+              disabled={creating}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold text-xs px-4 py-2.5 rounded-lg shadow-lg shadow-blue-500/20 transition-all cursor-pointer"
+            >
+              {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              <span>{creating ? 'Creating...' : 'Create Blank Workflow'}</span>
+            </button>
+          </div>
         </div>
 
-        {/* Loading / Cards Grid */}
+        {/* Workflow Cards */}
         {loading ? (
           <div className="flex items-center justify-center h-64 text-slate-500 gap-2 text-sm">
             <Loader2 className="h-5 w-5 animate-spin text-blue-400" />
@@ -115,7 +177,18 @@ export default function HomePage() {
                       <span className="text-[10px] font-mono tracking-wider bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20">
                         WORKFLOW ID: {wf.id.slice(0, 8).toUpperCase()}
                       </span>
-                      <span className="text-[10px] text-slate-500">{formattedDate}</span>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-slate-500">{formattedDate}</span>
+                        {/* Delete Button */}
+                        <button
+                          onClick={(e) => handleDeleteWorkflow(wf.id, e)}
+                          className="p-1 text-slate-500 hover:text-rose-400 transition-colors rounded hover:bg-slate-800"
+                          title="Delete Workflow"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
 
                     <h2 className="text-sm font-bold text-slate-100 group-hover:text-blue-400 transition-colors">
@@ -154,6 +227,12 @@ export default function HomePage() {
           </div>
         )}
       </div>
+
+      <TemplateModal
+        isOpen={isTemplateModalOpen}
+        onClose={() => setIsTemplateModalOpen(false)}
+        onSelectTemplate={handleCreateFromTemplate}
+      />
     </div>
   );
 }
