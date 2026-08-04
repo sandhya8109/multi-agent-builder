@@ -128,7 +128,16 @@ export async function executeWorkflowDAG(nodes: any[], edges: any[]) {
           node.data?.systemPrompt ||
           'You are a helpful assistant.';
 
-        const contextText = node.data?.userPrompt || combinedParentInputs || node.data?.value || '';
+        // Combine inputs from parents and local node prompt
+        let contextText = combinedParentInputs;
+        if (node.data?.userPrompt) {
+          contextText = contextText
+            ? `${contextText}\n\nAdditional Instructions:\n${node.data.userPrompt}`
+            : node.data.userPrompt;
+        } else if (!contextText && node.data?.value) {
+          contextText = node.data.value;
+        }
+
         const safeContext = contextText.slice(0, 10000);
 
         const result = await generateText({
@@ -147,16 +156,31 @@ export async function executeWorkflowDAG(nodes: any[], edges: any[]) {
         nodeOutputs[node.id] = content;
         node.data = { ...node.data, output: content, status: 'SUCCESS' };
       } else if (isApi) {
-        const content = node.data?.output || node.data?.response || node.data?.url || '';
-        nodeOutputs[node.id] = content;
-        node.data = { ...node.data, output: content, status: 'SUCCESS' };
+        const url = node.data?.url;
+        const method = node.data?.method || 'GET';
+
+        if (url) {
+          try {
+            const response = await fetch(url, { method });
+            const responseData = await response.text();
+            nodeOutputs[node.id] = responseData;
+            node.data = { ...node.data, output: responseData, status: 'SUCCESS' };
+          } catch (apiErr: any) {
+            const errText = `API Fetch Failed: ${apiErr.message}`;
+            nodeOutputs[node.id] = errText;
+            node.data = { ...node.data, output: errText, status: 'FAILED' };
+          }
+        } else {
+          nodeOutputs[node.id] = '';
+          node.data = { ...node.data, status: 'SUCCESS' };
+        }
       } else {
         nodeOutputs[node.id] = combinedParentInputs || node.data?.value || node.data?.output || '';
         node.data = { ...node.data, output: nodeOutputs[node.id], status: 'SUCCESS' };
       }
     } catch (err: any) {
       console.error(`Error executing node ${node.id}:`, err);
-      const errMsg = `Agent Execution Error: ${err.message}`;
+      const errMsg = `Execution Error: ${err.message}`;
       node.data = { ...node.data, status: 'FAILED', output: errMsg };
       nodeOutputs[node.id] = errMsg;
     }
