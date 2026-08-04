@@ -3,22 +3,47 @@
 import React from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { useCanvasStore } from '@/lib/hooks/useCanvasStore';
-import { Bot, Trash2, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
+import { Bot, Trash2, CheckCircle2, Loader2, AlertCircle, Play } from 'lucide-react';
 
 export function AgentNode({ id, data }: NodeProps) {
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   const setNodes = useCanvasStore((s) => s.setNodes);
   const nodes = useCanvasStore((s) => s.nodes);
+  const edges = useCanvasStore((s) => s.edges); // Required to trace parent connections
 
   const handleDelete = () => {
     setNodes(nodes.filter((n) => n.id !== id));
+  };
+
+  const handleTestSingleNode = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    updateNodeData(id, { status: 'RUNNING' });
+
+    try {
+      const res = await fetch('/api/workflows/test-node', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nodeId: id, nodes, edges }),
+      });
+
+      const result = await res.json();
+
+      if (res.ok && result.output) {
+        updateNodeData(id, { status: 'SUCCESS', output: result.output });
+      } else {
+        console.error('Test node execution failed:', result.error);
+        updateNodeData(id, { status: 'FAILED' });
+      }
+    } catch (err) {
+      console.error('Failed to run test node:', err);
+      updateNodeData(id, { status: 'FAILED' });
+    }
   };
 
   const status = (data.status as string) || 'IDLE';
 
   return (
     <div className="w-80 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl overflow-hidden font-sans text-xs">
-      {/* Top Handle */}
       <Handle
         type="target"
         position={Position.Top}
@@ -29,9 +54,11 @@ export function AgentNode({ id, data }: NodeProps) {
       <div className="flex items-center justify-between px-3 py-2 bg-slate-950/60 border-b border-slate-800">
         <div className="flex items-center gap-2">
           <Bot className="w-4 h-4 text-blue-400" />
-          <span className="font-semibold text-slate-200">New Agent</span>
+          <span className="font-semibold text-slate-200">
+            {(data.label as string) || 'Agent Node'}
+          </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {status === 'SUCCESS' && (
             <span className="flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full text-[10px] font-medium">
               <CheckCircle2 className="w-3 h-3" /> Done
@@ -47,9 +74,20 @@ export function AgentNode({ id, data }: NodeProps) {
               <AlertCircle className="w-3 h-3" /> Error
             </span>
           )}
+
+          {/* Play Button */}
+          <button
+            onClick={handleTestSingleNode}
+            className="p-1 text-slate-400 hover:text-emerald-400 transition-colors rounded hover:bg-slate-800"
+            title="Run this node with all upstream context"
+          >
+            <Play className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Delete Button */}
           <button
             onClick={handleDelete}
-            className="text-slate-500 hover:text-rose-400 transition-colors p-1"
+            className="p-1 text-slate-500 hover:text-rose-400 transition-colors rounded hover:bg-slate-800"
             title="Delete Node"
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -67,7 +105,7 @@ export function AgentNode({ id, data }: NodeProps) {
           <input
             type="text"
             className="nodrag w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-slate-200 focus:outline-none focus:border-blue-500 text-xs"
-            value={(data.label as string) || 'Assistant'}
+            value={(data.label as string) || ''}
             onChange={(e) => updateNodeData(id, { label: e.target.value })}
             placeholder="e.g. Assistant"
           />
@@ -123,7 +161,7 @@ export function AgentNode({ id, data }: NodeProps) {
             className="nodrag w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 focus:outline-none focus:border-blue-500 resize-none font-mono text-[11px]"
             value={(data.instructions as string) || ''}
             onChange={(e) => updateNodeData(id, { instructions: e.target.value })}
-            placeholder="Extract title and completion status into JSON..."
+            placeholder="Enter system instructions..."
           />
         </div>
 
@@ -140,7 +178,6 @@ export function AgentNode({ id, data }: NodeProps) {
         </div>
       </div>
 
-      {/* Bottom Handle */}
       <Handle
         type="source"
         position={Position.Bottom}
