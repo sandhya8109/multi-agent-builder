@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
-// @ts-expect-error pdf-parse module lacks standard export definitions
-import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
+
+// Use require to handle CJS module resolution during Vercel builds
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const pdfParse = require('pdf-parse');
 
 export async function POST(req: Request) {
   try {
