@@ -50,18 +50,18 @@ export async function POST(
     }
 
     // Pre-process Agent system prompts to interpolate {{JOB_DESCRIPTION}} and {{RESUME_TEXT}}
-    const processedNodes = nodes.map((node) => {
+    const processedNodes = nodes.map((node: any) => {
       if (node.type === 'agentNode' || node.type === 'agent') {
-        const incomingEdges = edges.filter((e) => e.target === node.id);
-        const connectedNodes = incomingEdges.map((e) =>
-          nodes.find((n) => n.id === e.source)
+        const incomingEdges = edges.filter((e: any) => e.target === node.id);
+        const connectedNodes = incomingEdges.map((e: any) =>
+          nodes.find((n: any) => n.id === e.source)
         );
 
         let jobDescriptionText = '';
         let resumeText = '';
         let extraInputs: string[] = [];
 
-        connectedNodes.forEach((connNode) => {
+        connectedNodes.forEach((connNode: any) => {
           if (!connNode) return;
           const content = connNode.data?.value || connNode.data?.text || '';
           const title = (connNode.data?.roleName || connNode.data?.title || '').toLowerCase();
