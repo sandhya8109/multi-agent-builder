@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+// @ts-expect-error pdf-parse module lacks standard export definitions
 import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
 
