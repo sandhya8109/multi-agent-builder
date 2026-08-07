@@ -5,7 +5,7 @@ import { Bot, FileText, Terminal, Globe, Search } from 'lucide-react';
 import { useCanvasStore } from '@/lib/hooks/useCanvasStore';
 
 export function NodePalette() {
-  const addNode = useCanvasStore((s) => s.addNode);
+  const addNode = useCanvasStore((s: any) => s.addNode);
 
   // Drag handler for dragging nodes onto canvas
   const onDragStart = (event: React.DragEvent, nodeType: string) => {
@@ -27,12 +27,12 @@ export function NodePalette() {
           type === 'agent'
             ? 'Agent Node'
             : type === 'input'
-            ? 'User Input'
-            : type === 'api'
-            ? 'API Fetcher'
-            : type === 'rag'
-            ? 'RAG Filter'
-            : 'Final Output',
+              ? 'User Input'
+              : type === 'api'
+                ? 'API Fetcher'
+                : type === 'rag'
+                  ? 'RAG Filter'
+                  : 'Final Output',
       },
     };
     addNode(newNode);
