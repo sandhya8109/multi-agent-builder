@@ -76,7 +76,7 @@ const handleCreateFromTemplate = async (template: WorkflowTemplate) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name: template.name || template.title,
+        name: template.name || (template as any).title,
         nodes: template.nodes || [],
         edges: template.edges || [],
       }),
