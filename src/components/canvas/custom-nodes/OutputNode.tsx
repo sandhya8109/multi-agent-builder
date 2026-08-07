@@ -6,7 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 export function OutputNode({ id, data }: NodeProps) {
-  const deleteNode = useCanvasStore((s) => s.deleteNode);
+  const deleteNode = useCanvasStore((s: any) => s.deleteNode);
   const output = (data as any).output || (data as any).value || 'Awaiting execution output...';
 
   return (

@@ -41,16 +41,14 @@ interface WorkflowCanvasProps {
 }
 
 function InnerWorkflowCanvas({ workflowId, onNodeClick }: WorkflowCanvasProps) {
-  const {
-    nodes,
-    edges,
-    onNodesChange,
-    onEdgesChange,
-    onConnect,
-    addNode,
-    setNodes,
-    setEdges,
-  } = useCanvasStore();
+  const { nodes,
+  edges,
+  setNodes,
+  setEdges,
+  onNodesChange,
+  onEdgesChange,
+  onConnect,
+  addNode, } = useCanvasStore((s: any) => s);
 
   const isInitialized = useRef(false);
   const { screenToFlowPosition } = useReactFlow();

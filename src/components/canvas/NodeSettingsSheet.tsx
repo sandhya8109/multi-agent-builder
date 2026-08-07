@@ -17,7 +17,7 @@ export function NodeSettingsSheet({ nodeId, onClose }: NodeSettingsSheetProps) {
 
   if (!nodeId || !selectedNode) return null;
 
-  const data = selectedNode.data || {};
+  const data: any = selectedNode.data || {};
 
   return (
     <div className="fixed inset-y-0 right-0 w-80 bg-slate-900 border-l border-slate-800 shadow-2xl z-50 flex flex-col font-sans transition-all">

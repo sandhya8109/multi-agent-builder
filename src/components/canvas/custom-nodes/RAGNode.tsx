@@ -5,8 +5,8 @@ import { Search, Trash2 } from 'lucide-react';
 import { useCanvasStore } from '@/lib/hooks/useCanvasStore';
 
 export function RAGNode({ id, data }: NodeProps) {
-  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
-  const deleteNode = useCanvasStore((s) => s.deleteNode);
+  const updateNodeData = useCanvasStore((s: any) => s.updateNodeData);
+  const deleteNode = useCanvasStore((s: any) => s.deleteNode);
 
   return (
     <div className="w-80 rounded-xl border border-slate-800 bg-slate-950/90 p-4 text-slate-100 backdrop-blur-md shadow-lg">
