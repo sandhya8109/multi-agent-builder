@@ -107,7 +107,27 @@ export async function POST(
     });
 
     // Run execution pipeline with hydrated nodes
+    // Run execution pipeline with hydrated nodes
     const result = await runWorkflowDAG(processedNodes, edges);
+
+    // PERSIST EXECUTION RUN TO SUPABASE
+    try {
+      const supabase = await createClient();
+      await supabase.from('workflow_runs').insert({
+        workflow_id: workflowId,
+        status: 'COMPLETED',
+        input_data: {
+          nodes: processedNodes.map((n: any) => ({
+            id: n.id,
+            type: n.type,
+            title: n.data?.label || n.data?.title,
+          })),
+          edgesCount: edges.length,
+        },
+      });
+    } catch (logErr) {
+      console.error('Failed to persist execution log:', logErr);
+    }
 
     return NextResponse.json({
       success: true,
@@ -115,11 +135,3 @@ export async function POST(
       nodes: result.nodes,
       outputs: result.outputs,
     });
-  } catch (error: any) {
-    console.error('Workflow execution error:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || 'Execution failed.' },
-      { status: 500 }
-    );
-  }
-}
