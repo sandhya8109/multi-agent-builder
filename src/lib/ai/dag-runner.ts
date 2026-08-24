@@ -1,6 +1,8 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { createGroq } from '@ai-sdk/groq';
 import { generateText } from 'ai';
+import { retrieveRelevantPassages } from './rag';
+import { safeFetch } from '@/lib/net/safe-fetch';
 
 // Initialize Provider Instances
 const openai = createOpenAI({
@@ -13,7 +15,7 @@ const groq = createGroq({
 
 // Helper to select the correct AI model instance
 function getModelInstance(modelName: string) {
-  let model = modelName ? modelName.trim() : '';
+  const model = modelName ? modelName.trim() : '';
 
   if (
     !model ||
@@ -86,7 +88,28 @@ function getTopologicallySortedNodes(nodes: any[], edges: any[]): any[] {
   return sorted;
 }
 
-export async function executeWorkflowDAG(nodes: any[], edges: any[]) {
+// Per-node log record emitted during execution.
+export interface NodeLog {
+  nodeId: string;
+  nodeLabel: string;
+  status: 'SUCCESS' | 'FAILED';
+  inputContext: string;
+  output: string;
+}
+
+export interface RunWorkflowOptions {
+  // Called after each node finishes (success or failure). Awaited so callers
+  // can persist logs in order.
+  onNodeResult?: (log: NodeLog) => Promise<void> | void;
+}
+
+const MAX_CONTEXT_CHARS = 10_000;
+
+export async function executeWorkflowDAG(
+  nodes: any[],
+  edges: any[],
+  options: RunWorkflowOptions = {}
+) {
   const nodeOutputs: Record<string, any> = {};
 
   // Map incoming edge dependencies
@@ -116,10 +139,15 @@ export async function executeWorkflowDAG(nodes: any[], edges: any[]) {
       .filter(Boolean)
       .join('\n\n--- INCOMING INPUT ---\n\n');
 
+    let inputContext = combinedParentInputs;
+    let output = '';
+    let status: NodeLog['status'] = 'SUCCESS';
+
     try {
       const isAgent = node.type === 'agentNode' || node.type === 'agent';
       const isInput = node.type === 'inputNode' || node.type === 'input';
       const isApi = node.type === 'apiNode' || node.type === 'apiFetcher' || node.type === 'api';
+      const isRag = node.type === 'ragNode' || node.type === 'rag';
 
       if (isAgent) {
         const modelName = node.data?.model || 'llama-3.1-8b-instant';
@@ -138,7 +166,8 @@ export async function executeWorkflowDAG(nodes: any[], edges: any[]) {
           contextText = node.data.value;
         }
 
-        const safeContext = contextText.slice(0, 10000);
+        const safeContext = contextText.slice(0, MAX_CONTEXT_CHARS);
+        inputContext = safeContext;
 
         const result = await generateText({
           model: getModelInstance(modelName),
@@ -149,40 +178,69 @@ export async function executeWorkflowDAG(nodes: any[], edges: any[]) {
           temperature: node.data?.temperature ?? 0.3,
         });
 
-        nodeOutputs[node.id] = result.text;
-        node.data = { ...node.data, output: result.text, status: 'SUCCESS' };
+        output = result.text;
       } else if (isInput) {
         const content = node.data?.value || node.data?.content || node.data?.text || '';
-        nodeOutputs[node.id] = content;
-        node.data = { ...node.data, output: content, status: 'SUCCESS' };
+        inputContext = '';
+        output = content;
       } else if (isApi) {
         const url = node.data?.url;
         const method = node.data?.method || 'GET';
+        inputContext = url ? `${method} ${url}` : '';
 
         if (url) {
           try {
-            const response = await fetch(url, { method });
-            const responseData = await response.text();
-            nodeOutputs[node.id] = responseData;
-            node.data = { ...node.data, output: responseData, status: 'SUCCESS' };
+            const res = await safeFetch(url, {
+              method,
+              headers: node.data?.headers,
+              body: node.data?.body,
+            });
+            output = res.truncated
+              ? `${res.text}\n\n[Response truncated at size limit]`
+              : res.text;
+            status = res.ok ? 'SUCCESS' : 'FAILED';
           } catch (apiErr: any) {
-            const errText = `API Fetch Failed: ${apiErr.message}`;
-            nodeOutputs[node.id] = errText;
-            node.data = { ...node.data, output: errText, status: 'FAILED' };
+            output = `API Fetch Failed: ${apiErr.message}`;
+            status = 'FAILED';
           }
         } else {
-          nodeOutputs[node.id] = '';
-          node.data = { ...node.data, status: 'SUCCESS' };
+          output = '';
         }
+      } else if (isRag) {
+        const query = node.data?.query || '';
+        const topK = node.data?.topK || 3;
+        inputContext = combinedParentInputs;
+
+        const rag = await retrieveRelevantPassages(combinedParentInputs, query, topK);
+        output = rag.text;
+        node.data = { ...node.data, ragMethod: rag.method };
       } else {
-        nodeOutputs[node.id] = combinedParentInputs || node.data?.value || node.data?.output || '';
-        node.data = { ...node.data, output: nodeOutputs[node.id], status: 'SUCCESS' };
+        output = combinedParentInputs || node.data?.value || node.data?.output || '';
       }
+
+      nodeOutputs[node.id] = output;
+      node.data = { ...node.data, output, status };
     } catch (err: any) {
       console.error(`Error executing node ${node.id}:`, err);
-      const errMsg = `Execution Error: ${err.message}`;
-      node.data = { ...node.data, status: 'FAILED', output: errMsg };
-      nodeOutputs[node.id] = errMsg;
+      output = `Execution Error: ${err.message}`;
+      status = 'FAILED';
+      node.data = { ...node.data, status, output };
+      nodeOutputs[node.id] = output;
+    }
+
+    // Emit the per-node log (order preserved because we await).
+    if (options.onNodeResult) {
+      try {
+        await options.onNodeResult({
+          nodeId: node.id,
+          nodeLabel: node.data?.label || node.data?.title || node.type || 'Node',
+          status,
+          inputContext,
+          output,
+        });
+      } catch (logErr) {
+        console.error(`Failed to emit log for node ${node.id}:`, logErr);
+      }
     }
   }
 

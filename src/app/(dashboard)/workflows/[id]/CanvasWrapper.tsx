@@ -135,6 +135,14 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
     setIsRunning(true);
     await handleSaveCanvas();
 
+    // Generate the run id up front and mark it active so the Execution Logs
+    // panel subscribes to this run's realtime inserts as they happen.
+    const runId =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    setActiveRunId(runId);
+
     const safeNodes = Array.isArray(nodes) ? nodes : [];
 
     // Mark agent nodes as RUNNING
@@ -148,7 +156,7 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
       const res = await fetch(`/api/workflows/${workflowId}/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nodes, edges }),
+        body: JSON.stringify({ nodes, edges, runId }),
       });
 
       const resText = await res.text();
@@ -163,7 +171,8 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
         throw new Error(result.error || 'Workflow execution failed');
       }
 
-      setActiveRunId(result.workflowId);
+      // Prefer the server's runId (defensive; normally equals the one we sent).
+      if (result.runId) setActiveRunId(result.runId);
 
       if (Array.isArray(result.nodes) && result.nodes.length > 0) {
         setNodes(result.nodes);

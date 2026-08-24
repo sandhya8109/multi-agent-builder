@@ -19,6 +19,10 @@ export async function POST(
 
     let nodes = body.nodes;
     let edges = body.edges;
+    // Client may supply a runId so its realtime logs subscription matches the
+    // rows we write during this run. Fall back to a server-generated id.
+    const runId: string =
+      typeof body.runId === 'string' && body.runId ? body.runId : crypto.randomUUID();
 
     // Fallback to Supabase if nodes or edges are not in request body
     if (!nodes || !edges) {
@@ -106,16 +110,15 @@ export async function POST(
       return node;
     });
 
-    // Run execution pipeline with hydrated nodes
-    // Run execution pipeline with hydrated nodes
-    const result = await runWorkflowDAG(processedNodes, edges);
-
-    // PERSIST EXECUTION RUN TO SUPABASE
+    // Create the run row up front so per-node logs can reference it (and the
+    // client's realtime subscription on this runId receives inserts live).
+    const supabase = await createClient();
+    let runPersisted = true;
     try {
-      const supabase = await createClient();
-      await supabase.from('workflow_runs').insert({
+      const { error: runErr } = await supabase.from('workflow_runs').insert({
+        id: runId,
         workflow_id: workflowId,
-        status: 'COMPLETED',
+        status: 'RUNNING',
         input_data: {
           nodes: processedNodes.map((n: any) => ({
             id: n.id,
@@ -125,13 +128,53 @@ export async function POST(
           edgesCount: edges.length,
         },
       });
-    } catch (logErr) {
-      console.error('Failed to persist execution log:', logErr);
+      if (runErr) throw runErr;
+    } catch (runErr) {
+      // Logging is best-effort: if the run row can't be created (e.g. schema
+      // not applied yet), still execute the workflow and return results.
+      runPersisted = false;
+      console.error('Failed to create workflow run:', runErr);
+    }
+
+    // Run execution pipeline with hydrated nodes, persisting a log per node.
+    let anyFailed = false;
+    const result = await runWorkflowDAG(processedNodes, edges, {
+      onNodeResult: async (log) => {
+        if (log.status === 'FAILED') anyFailed = true;
+        if (!runPersisted) return;
+        const { error: logErr } = await supabase.from('run_logs').insert({
+          run_id: runId,
+          node_id: log.nodeId,
+          node_label: log.nodeLabel,
+          status: log.status,
+          log_data: {
+            input_context: log.inputContext?.slice(0, 20_000) ?? '',
+            output: typeof log.output === 'string' ? log.output.slice(0, 50_000) : '',
+          },
+        });
+        if (logErr) console.error(`Failed to persist log for node ${log.nodeId}:`, logErr);
+      },
+    });
+
+    // Finalize the run status.
+    if (runPersisted) {
+      try {
+        await supabase
+          .from('workflow_runs')
+          .update({
+            status: anyFailed ? 'FAILED' : 'COMPLETED',
+            finished_at: new Date().toISOString(),
+          })
+          .eq('id', runId);
+      } catch (finalErr) {
+        console.error('Failed to finalize workflow run:', finalErr);
+      }
     }
 
     return NextResponse.json({
       success: true,
       workflowId,
+      runId,
       nodes: result.nodes,
       outputs: result.outputs,
     });

@@ -35,12 +35,34 @@ interface ExecutionLogsSheetProps {
 export function ExecutionLogsSheet({ runId, isOpen, onClose }: ExecutionLogsSheetProps) {
   const [logs, setLogs] = useState<LogItem[]>([]);
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-  const supabase = createClient();
+  // Create the browser client once; recreating it each render would make the
+  // realtime effect resubscribe on every render.
+  const [supabase] = useState(() => createClient());
+
+  // Reset logs when switching to a different run.
+  useEffect(() => {
+    setLogs([]);
+  }, [runId]);
 
   useEffect(() => {
     if (!runId || !isOpen) return;
 
-    // Fetch initial logs for run
+    const addLogs = (incoming: LogItem[]) => {
+      setLogs((prev) => {
+        const seen = new Set(prev.map((l) => l.id));
+        const merged = [...prev];
+        for (const log of incoming) {
+          if (!seen.has(log.id)) {
+            merged.push(log);
+            seen.add(log.id);
+          }
+        }
+        return merged;
+      });
+      incoming.forEach((log) => updateNodeData(log.node_id, { status: log.status }));
+    };
+
+    // Fetch any logs already written for this run.
     const fetchLogs = async () => {
       const { data } = await supabase
         .from('run_logs')
@@ -48,17 +70,12 @@ export function ExecutionLogsSheet({ runId, isOpen, onClose }: ExecutionLogsShee
         .eq('run_id', runId)
         .order('created_at', { ascending: true });
 
-      if (data) {
-        setLogs(data as LogItem[]);
-        data.forEach((log) => {
-          updateNodeData(log.node_id, { status: log.status });
-        });
-      }
+      if (data) addLogs(data as LogItem[]);
     };
 
     fetchLogs();
 
-    // Realtime listener for run logs
+    // Realtime listener for logs written after we subscribed.
     const channel = supabase
       .channel(`run-logs-${runId}`)
       .on(
@@ -70,11 +87,7 @@ export function ExecutionLogsSheet({ runId, isOpen, onClose }: ExecutionLogsShee
           filter: `run_id=eq.${runId}`,
         },
         (payload) => {
-          const newLog = payload.new as LogItem;
-          setLogs((prev) => [...prev, newLog]);
-
-          // Real-time canvas node status update
-          updateNodeData(newLog.node_id, { status: newLog.status });
+          addLogs([payload.new as LogItem]);
         }
       )
       .subscribe();
