@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/client';
+import { createClient } from '@/lib/supabase/server';
 
 // GET all workflows
 export async function GET() {
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data, error } = await supabase
       .from('workflows')
       .select('*')
@@ -25,7 +25,7 @@ export async function GET() {
 // POST create workflow
 export async function POST(req: Request) {
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
     const body = await req.json();
     const { name, title, nodes = [], edges = [] } = body;
     const workflowName = name || title || 'New Multi-Agent Workflow';
@@ -57,7 +57,7 @@ export async function POST(req: Request) {
 // DELETE workflow by ID
 export async function DELETE(req: Request) {
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
 

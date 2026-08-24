@@ -3,7 +3,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { RAGNode } from '@/components/canvas/custom-nodes/RAGNode';
 
 export async function createWorkflowAction() {
   const supabase = await createClient();

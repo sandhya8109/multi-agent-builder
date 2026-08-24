@@ -135,3 +135,11 @@ export async function POST(
       nodes: result.nodes,
       outputs: result.outputs,
     });
+  } catch (err: any) {
+    console.error('Workflow execution error:', err);
+    return NextResponse.json(
+      { success: false, error: err?.message || 'Workflow execution failed' },
+      { status: 500 }
+    );
+  }
+}

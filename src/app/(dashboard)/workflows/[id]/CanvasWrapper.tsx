@@ -55,8 +55,10 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
         const res = await fetch(`/api/workflows/${workflowId}`);
         if (res.ok) {
           const data = await res.json();
-          setNodes(data.nodes || []);
-          setEdges(data.edges || []);
+          // GET /api/workflows/[id] returns { workflow: { nodes, edges, ... } }
+          const workflow = data.workflow || data;
+          setNodes(workflow.nodes || []);
+          setEdges(workflow.edges || []);
         } else {
           console.error('Failed to load workflow data from database');
         }

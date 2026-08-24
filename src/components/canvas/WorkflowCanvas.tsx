@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useRef, useEffect } from 'react';
+import React, { useCallback } from 'react';
 import {
   ReactFlow,
   Background,
@@ -40,40 +40,19 @@ interface WorkflowCanvasProps {
   onNodeClick?: (id: string) => void;
 }
 
-function InnerWorkflowCanvas({ workflowId, onNodeClick }: WorkflowCanvasProps) {
-  const { nodes,
-  edges,
-  setNodes,
-  setEdges,
-  onNodesChange,
-  onEdgesChange,
-  onConnect,
-  addNode, } = useCanvasStore((s: any) => s);
+function InnerWorkflowCanvas({ onNodeClick }: WorkflowCanvasProps) {
+  const nodes = useCanvasStore((s) => s.nodes);
+  const edges = useCanvasStore((s) => s.edges);
+  const onNodesChange = useCanvasStore((s) => s.onNodesChange);
+  const onEdgesChange = useCanvasStore((s) => s.onEdgesChange);
+  const onConnect = useCanvasStore((s) => s.onConnect);
+  const addNode = useCanvasStore((s) => s.addNode);
 
-  const isInitialized = useRef(false);
   const { screenToFlowPosition } = useReactFlow();
 
-  // Load saved workflow state on mount
-  useEffect(() => {
-    if (isInitialized.current) return;
-    isInitialized.current = true;
-
-    async function loadCanvas() {
-      try {
-        const res = await fetch(`/api/workflows/${workflowId}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data.workflow) {
-          if (data.workflow.nodes) setNodes(data.workflow.nodes);
-          if (data.workflow.edges) setEdges(data.workflow.edges);
-        }
-      } catch (err) {
-        console.error('Failed to load workflow state:', err);
-      }
-    }
-
-    loadCanvas();
-  }, [workflowId, setNodes, setEdges]);
+  // Note: canvas state is loaded once by CanvasWrapper on mount, so this
+  // component no longer fetches the workflow itself (that caused a duplicate
+  // request and a race that could blank the canvas).
 
   // Handle Drag & Drop Node Creation
   const onDragOver = useCallback((event: React.DragEvent) => {
