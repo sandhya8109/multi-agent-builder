@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 
 export async function POST(
   req: Request,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const resolvedParams = await params;
