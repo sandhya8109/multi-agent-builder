@@ -26,7 +26,7 @@ export async function createWorkflowAction() {
         label: 'Summary Agent',
         role: 'Summarizer',
         systemPrompt: 'Summarize the input text into 3 concise bullet points.',
-        model: 'llama-3.3-70b-versatile',
+        model: 'openai/gpt-oss-120b',
         status: 'IDLE',
       },
     },

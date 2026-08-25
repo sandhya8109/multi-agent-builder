@@ -119,12 +119,14 @@ export function AgentNode({ id, data }: NodeProps) {
             </label>
             <select
               className="nodrag w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-slate-200 focus:outline-none focus:border-blue-500 text-xs"
-              value={(data.model as string) || 'llama-3.3-70b-versatile'}
+              value={(data.model as string) || 'openai/gpt-oss-20b'}
               onChange={(e) => updateNodeData(id, { model: e.target.value })}
             >
-              <option value="llama-3.3-70b-versatile">Llama 3.3 70B</option>
-              <option value="llama-3.1-8b-instant">Llama 3.1 8B</option>
-              <option value="gpt-4o-mini">GPT-4o Mini</option>
+              <option value="openai/gpt-oss-20b">Groq: GPT-OSS 20B (fast)</option>
+              <option value="openai/gpt-oss-120b">Groq: GPT-OSS 120B</option>
+              <option value="qwen/qwen3.6-27b">Groq: Qwen 3.6 27B</option>
+              <option value="groq/compound">Groq: Compound</option>
+              <option value="gpt-4o-mini">OpenAI: GPT-4o Mini</option>
             </select>
           </div>
 

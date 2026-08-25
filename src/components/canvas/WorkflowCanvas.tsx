@@ -79,7 +79,7 @@ function InnerWorkflowCanvas({ onNodeClick }: WorkflowCanvasProps) {
         data: {
           label: `${type.toUpperCase()} Node`,
           instructions: 'You are a helpful assistant.',
-          model: 'llama-3.1-8b-instant',
+          model: 'openai/gpt-oss-20b',
           temperature: 0.3,
         },
       };

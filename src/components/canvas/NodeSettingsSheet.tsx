@@ -52,12 +52,15 @@ export function NodeSettingsSheet({ nodeId, onClose }: NodeSettingsSheetProps) {
                 <Cpu className="w-3.5 h-3.5 text-purple-400" /> LLM Model
               </label>
               <select
-                value={data.model || 'gpt-4o-mini'}
+                value={data.model || 'openai/gpt-oss-20b'}
                 onChange={(e) => updateNodeData(selectedNode.id, { model: e.target.value })}
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-200 focus:outline-none focus:border-blue-500"
               >
-                <option value="gpt-4o-mini">OpenAI (gpt-4o-mini)</option>
-                <option value="llama-3.3-70b-versatile">Groq (llama-3.3-70b)</option>
+                <option value="openai/gpt-oss-20b">Groq: GPT-OSS 20B (fast)</option>
+                <option value="openai/gpt-oss-120b">Groq: GPT-OSS 120B</option>
+                <option value="qwen/qwen3.6-27b">Groq: Qwen 3.6 27B</option>
+                <option value="groq/compound">Groq: Compound</option>
+                <option value="gpt-4o-mini">OpenAI: GPT-4o Mini</option>
               </select>
             </div>
 

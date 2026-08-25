@@ -13,32 +13,33 @@ const groq = createGroq({
   apiKey: process.env.GROQ_API_KEY || '',
 });
 
-// Helper to select the correct AI model instance
+// Current Groq-hosted default (the older llama-3.x models were retired).
+const DEFAULT_GROQ_MODEL = 'openai/gpt-oss-20b';
+const LARGE_GROQ_MODEL = 'openai/gpt-oss-120b';
+
+// Helper to select the correct AI model instance.
+//
+// Provider routing note: several Groq-hosted models are namespaced with a
+// vendor prefix that contains a slash (e.g. "openai/gpt-oss-20b",
+// "qwen/qwen3.6-27b", "groq/compound"). Those must still go through the Groq
+// provider, NOT the OpenAI provider — so we route by slash / known patterns,
+// and only treat un-prefixed "gpt-*" / "o*" names as real OpenAI API models.
 function getModelInstance(modelName: string) {
   const model = modelName ? modelName.trim() : '';
 
-  if (
-    !model ||
-    model.includes('llama3-8b-8192') ||
-    model.includes('llama3-8b') ||
-    model === 'llama3-70b-8192'
-  ) {
-    return groq('llama-3.1-8b-instant');
-  }
+  if (!model) return groq(DEFAULT_GROQ_MODEL);
 
-  if (model.includes('llama-3.3') || model.includes('70b')) {
-    return groq('llama-3.3-70b-versatile');
-  }
+  // Auto-migrate retired Groq model ids (present in older saved workflows).
+  if (/llama-?3\.1-8b|llama3-8b|8b-instant/i.test(model)) return groq(DEFAULT_GROQ_MODEL);
+  if (/llama-?3\.3|llama3-70b|70b-versatile|(^|[^0-9])70b/i.test(model)) return groq(LARGE_GROQ_MODEL);
 
-  if (
-    model.toLowerCase().includes('llama') ||
-    model.toLowerCase().includes('groq') ||
-    model.toLowerCase().includes('mixtral')
-  ) {
+  // Groq-hosted models: vendor-prefixed (has a slash) or known families.
+  if (model.includes('/') || /groq|qwen|allam|gpt-oss|compound|mixtral|llama/i.test(model)) {
     return groq(model);
   }
 
-  return openai(model || 'gpt-4o-mini');
+  // Otherwise a real OpenAI API model (e.g. gpt-4o-mini, o4-mini).
+  return openai(model);
 }
 
 // Helper: Topologically sort nodes so parents run before children
@@ -150,7 +151,7 @@ export async function executeWorkflowDAG(
       const isRag = node.type === 'ragNode' || node.type === 'rag';
 
       if (isAgent) {
-        const modelName = node.data?.model || 'llama-3.1-8b-instant';
+        const modelName = node.data?.model || DEFAULT_GROQ_MODEL;
         const systemInstructions =
           node.data?.instructions ||
           node.data?.systemPrompt ||
