@@ -1,7 +1,14 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { hasSupabaseConfig } from '@/lib/env';
+
+export { hasSupabaseConfig };
 
 export async function createClient() {
+  if (!hasSupabaseConfig()) {
+    throw new Error('Supabase is not configured. Use demo mode or add env vars.');
+  }
+
   const cookieStore = await cookies();
 
   return createServerClient(

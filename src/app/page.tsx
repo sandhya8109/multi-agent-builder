@@ -20,6 +20,20 @@ export default function HomePage() {
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const router = useRouter();
 
+  useEffect(() => {
+    const hasDemoSession = document.cookie.split('; ').some((cookie) => cookie.startsWith('demo_session='));
+    const hasSupabaseSession = document.cookie.split('; ').some(
+      (cookie) => cookie.startsWith('sb-') && cookie.includes('auth-token')
+    );
+
+    if (!hasDemoSession && !hasSupabaseSession) {
+      router.replace('/login');
+      return;
+    }
+
+    fetchWorkflows();
+  }, [router]);
+
   const fetchWorkflows = async () => {
     try {
       const res = await fetch('/api/workflows');
@@ -34,10 +48,6 @@ export default function HomePage() {
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    fetchWorkflows();
-  }, []);
 
 const handleCreateWorkflow = async () => {
   setCreating(true);

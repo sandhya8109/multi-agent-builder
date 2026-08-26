@@ -2,7 +2,6 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createGroq } from '@ai-sdk/groq';
 import { generateText } from 'ai';
 
-// Initialize Provider Instances
 const openai = createOpenAI({
   apiKey: process.env.OPENAI_API_KEY || '',
 });
@@ -11,9 +10,12 @@ const groq = createGroq({
   apiKey: process.env.GROQ_API_KEY || '',
 });
 
-// Helper to select the correct AI model instance
+function hasAIProvider() {
+  return Boolean(process.env.OPENAI_API_KEY || process.env.GROQ_API_KEY);
+}
+
 function getModelInstance(modelName: string) {
-  let model = modelName ? modelName.trim() : '';
+  const model = modelName ? modelName.trim() : '';
 
   if (
     !model ||
@@ -39,7 +41,6 @@ function getModelInstance(modelName: string) {
   return openai(model || 'gpt-4o-mini');
 }
 
-// Helper: Topologically sort nodes so parents run before children
 function getTopologicallySortedNodes(nodes: any[], edges: any[]): any[] {
   const nodeMap = new Map<string, any>(nodes.map((n) => [n.id, n]));
   const inDegree: Record<string, number> = {};
@@ -76,12 +77,15 @@ function getTopologicallySortedNodes(nodes: any[], edges: any[]): any[] {
     });
   }
 
-  // Fallback for any unvisited nodes (e.g. cycles)
-  nodes.forEach((n) => {
-    if (!sorted.find((s) => s.id === n.id)) {
-      sorted.push(n);
-    }
-  });
+  const cycleNodes = nodes
+    .filter((node) => !sorted.some((entry) => entry.id === node.id))
+    .map((node) => node.id);
+
+  if (cycleNodes.length > 0) {
+    throw new Error(
+      `Workflow graph contains a cycle. Check the connections for: ${cycleNodes.join(', ')}`
+    );
+  }
 
   return sorted;
 }
@@ -89,7 +93,14 @@ function getTopologicallySortedNodes(nodes: any[], edges: any[]): any[] {
 export async function executeWorkflowDAG(nodes: any[], edges: any[]) {
   const nodeOutputs: Record<string, any> = {};
 
-  // Map incoming edge dependencies
+  if (!nodes.length) {
+    return { nodes: [], outputs: {} };
+  }
+
+  if (!hasAIProvider()) {
+    throw new Error('No AI provider is configured. Add OPENAI_API_KEY or GROQ_API_KEY to run agent nodes.');
+  }
+
   const incomingEdges: Record<string, string[]> = {};
   edges.forEach((edge) => {
     if (!incomingEdges[edge.target]) {
@@ -98,13 +109,11 @@ export async function executeWorkflowDAG(nodes: any[], edges: any[]) {
     incomingEdges[edge.target].push(edge.source);
   });
 
-  // Sort nodes topologically for correct sequence execution
   const sortedNodes = getTopologicallySortedNodes(nodes, edges);
 
   for (const node of sortedNodes) {
     const parentNodeIds = incomingEdges[node.id] || [];
 
-    // Combine upstream parent outputs
     const combinedParentInputs = parentNodeIds
       .map((parentId) => {
         const parentOutput = nodeOutputs[parentId];
@@ -124,11 +133,8 @@ export async function executeWorkflowDAG(nodes: any[], edges: any[]) {
       if (isAgent) {
         const modelName = node.data?.model || 'llama-3.1-8b-instant';
         const systemInstructions =
-          node.data?.instructions ||
-          node.data?.systemPrompt ||
-          'You are a helpful assistant.';
+          node.data?.instructions || node.data?.systemPrompt || 'You are a helpful assistant.';
 
-        // Combine inputs from parents and local node prompt
         let contextText = combinedParentInputs;
         if (node.data?.userPrompt) {
           contextText = contextText

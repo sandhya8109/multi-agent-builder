@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { runWorkflowDAG } from '@/lib/ai/dag-runner';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, hasSupabaseConfig } from '@/lib/supabase/server';
 
 export async function POST(
   req: Request,
@@ -17,25 +17,26 @@ export async function POST(
       // Empty body passed
     }
 
-    let nodes = body.nodes;
-    let edges = body.edges;
+    let nodes = Array.isArray(body.nodes) ? body.nodes : [];
+    let edges = Array.isArray(body.edges) ? body.edges : [];
 
-    // Fallback to Supabase if nodes or edges are not in request body
-    if (!nodes || !edges) {
-      try {
-        const supabase = await createClient();
-        const { data: workflow } = await supabase
-          .from('workflows')
-          .select('nodes, edges')
-          .eq('id', workflowId)
-          .single();
+    if ((!nodes.length && !edges.length) || (!nodes.length && edges.length > 0) || (nodes.length > 0 && !edges.length)) {
+      if (hasSupabaseConfig()) {
+        try {
+          const supabase = await createClient();
+          const { data: workflow } = await supabase
+            .from('workflows')
+            .select('nodes, edges')
+            .eq('id', workflowId)
+            .single();
 
-        if (workflow) {
-          nodes = nodes || workflow.nodes;
-          edges = edges || workflow.edges;
+          if (workflow) {
+            nodes = Array.isArray(workflow.nodes) ? workflow.nodes : nodes;
+            edges = Array.isArray(workflow.edges) ? workflow.edges : edges;
+          }
+        } catch (dbErr) {
+          console.warn('Could not fetch workflow from database fallback:', dbErr);
         }
-      } catch (dbErr) {
-        console.warn('Could not fetch workflow from database fallback:', dbErr);
       }
     }
 
@@ -49,7 +50,6 @@ export async function POST(
       );
     }
 
-    // Pre-process Agent system prompts to interpolate {{JOB_DESCRIPTION}} and {{RESUME_TEXT}}
     const processedNodes = nodes.map((node: any) => {
       if (node.type === 'agentNode' || node.type === 'agent') {
         const incomingEdges = edges.filter((e: any) => e.target === node.id);
@@ -59,14 +59,13 @@ export async function POST(
 
         let jobDescriptionText = '';
         let resumeText = '';
-        let extraInputs: string[] = [];
+        const extraInputs: string[] = [];
 
         connectedNodes.forEach((connNode: any) => {
           if (!connNode) return;
           const content = connNode.data?.value || connNode.data?.text || '';
           const title = (connNode.data?.roleName || connNode.data?.title || '').toLowerCase();
 
-          // Match node content or title to classify Job Description vs Resume
           if (title.includes('job') || title.includes('jd') || content.toLowerCase().includes('job description')) {
             jobDescriptionText += content + '\n\n';
           } else if (title.includes('resume') || title.includes('cv') || content.toLowerCase().includes('experience')) {
@@ -76,7 +75,6 @@ export async function POST(
           }
         });
 
-        // Fallback: If no clear title matching, assign connected inputs by position
         if (!jobDescriptionText && connectedNodes[0]) {
           jobDescriptionText = connectedNodes[0].data?.value || connectedNodes[0].data?.text || '';
         }
@@ -86,7 +84,6 @@ export async function POST(
 
         let instructions = node.data?.instructions || node.data?.systemPrompt || '';
 
-        // Hydrate variables in system instructions
         instructions = instructions
           .replace('{{JOB_DESCRIPTION}}', jobDescriptionText.trim() || '[No Job Description Provided]')
           .replace('{{RESUME_TEXT}}', resumeText.trim() || '[No Resume Provided]')
@@ -98,35 +95,36 @@ export async function POST(
           data: {
             ...node.data,
             instructions,
-            // Pass full hydrated prompt to execution engine
-            userPrompt: extraInputs.length > 0 ? extraInputs.join('\n\n') : 'Evaluate the provided Job Description and Resume according to your system instructions.',
+            userPrompt:
+              extraInputs.length > 0
+                ? extraInputs.join('\n\n')
+                : 'Evaluate the provided Job Description and Resume according to your system instructions.',
           },
         };
       }
       return node;
     });
 
-    // Run execution pipeline with hydrated nodes
-    // Run execution pipeline with hydrated nodes
     const result = await runWorkflowDAG(processedNodes, edges);
 
-    // PERSIST EXECUTION RUN TO SUPABASE
-    try {
-      const supabase = await createClient();
-      await supabase.from('workflow_runs').insert({
-        workflow_id: workflowId,
-        status: 'COMPLETED',
-        input_data: {
-          nodes: processedNodes.map((n: any) => ({
-            id: n.id,
-            type: n.type,
-            title: n.data?.label || n.data?.title,
-          })),
-          edgesCount: edges.length,
-        },
-      });
-    } catch (logErr) {
-      console.error('Failed to persist execution log:', logErr);
+    if (hasSupabaseConfig()) {
+      try {
+        const supabase = await createClient();
+        await supabase.from('workflow_runs').insert({
+          workflow_id: workflowId,
+          status: 'COMPLETED',
+          input_data: {
+            nodes: processedNodes.map((n: any) => ({
+              id: n.id,
+              type: n.type,
+              title: n.data?.label || n.data?.title,
+            })),
+            edgesCount: edges.length,
+          },
+        });
+      } catch (logErr) {
+        console.error('Failed to persist execution log:', logErr);
+      }
     }
 
     return NextResponse.json({
@@ -135,3 +133,14 @@ export async function POST(
       nodes: result.nodes,
       outputs: result.outputs,
     });
+  } catch (error: any) {
+    console.error('Workflow execution failed:', error);
+    return NextResponse.json(
+      {
+        success: false,
+        error: error.message || 'Workflow execution failed',
+      },
+      { status: 400 }
+    );
+  }
+}

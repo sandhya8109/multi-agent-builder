@@ -1,9 +1,40 @@
 import { NextResponse } from 'next/server';
+import { hasSupabaseConfig } from '@/lib/env';
 import { createClient } from '@/lib/supabase/client';
+
+const DEMO_WORKFLOW_ID = 'demo-workflow';
+
+const demoWorkflowState: {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  nodes: any[];
+  edges: any[];
+} = {
+  id: DEMO_WORKFLOW_ID,
+  name: 'Demo Workflow',
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+  nodes: [],
+  edges: [],
+};
+
+function getDemoWorkflowSnapshot() {
+  return {
+    ...demoWorkflowState,
+    created_at: demoWorkflowState.created_at || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+}
 
 // GET all workflows
 export async function GET() {
   try {
+    if (!hasSupabaseConfig()) {
+      return NextResponse.json([getDemoWorkflowSnapshot()]);
+    }
+
     const supabase = createClient();
     const { data, error } = await supabase
       .from('workflows')
@@ -25,6 +56,27 @@ export async function GET() {
 // POST create workflow
 export async function POST(req: Request) {
   try {
+    if (!hasSupabaseConfig()) {
+      let body: any = {};
+      try {
+        body = await req.json();
+      } catch {
+        // Empty body passed.
+      }
+
+      const { name, title, nodes = [], edges = [] } = body;
+      const workflowName = name || title || demoWorkflowState.name || 'New Multi-Agent Workflow';
+
+      demoWorkflowState.id = DEMO_WORKFLOW_ID;
+      demoWorkflowState.name = workflowName;
+      demoWorkflowState.nodes = Array.isArray(nodes) ? nodes : demoWorkflowState.nodes;
+      demoWorkflowState.edges = Array.isArray(edges) ? edges : demoWorkflowState.edges;
+      demoWorkflowState.created_at = demoWorkflowState.created_at || new Date().toISOString();
+      demoWorkflowState.updated_at = new Date().toISOString();
+
+      return NextResponse.json(getDemoWorkflowSnapshot());
+    }
+
     const supabase = createClient();
     const body = await req.json();
     const { name, title, nodes = [], edges = [] } = body;
@@ -57,6 +109,10 @@ export async function POST(req: Request) {
 // DELETE workflow by ID
 export async function DELETE(req: Request) {
   try {
+    if (!hasSupabaseConfig()) {
+      return NextResponse.json({ success: true });
+    }
+
     const supabase = createClient();
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
