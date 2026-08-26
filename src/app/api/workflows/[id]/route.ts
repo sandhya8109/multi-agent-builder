@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, hasSupabaseConfig } from '@/lib/supabase/server';
 
 // GET: Load single workflow by ID
 export async function GET(
@@ -8,6 +8,19 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+
+    if (!hasSupabaseConfig()) {
+      return NextResponse.json({
+        workflow: {
+          id,
+          name: 'Demo Workflow',
+          nodes: [],
+          edges: [],
+          created_at: new Date().toISOString(),
+        },
+      });
+    }
+
     const supabase = await createClient();
 
     const { data: workflow, error } = await supabase
@@ -36,6 +49,11 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
+
+    if (!hasSupabaseConfig()) {
+      return NextResponse.json({ success: true });
+    }
+
     const supabase = await createClient();
 
     const { error } = await supabase
@@ -62,6 +80,19 @@ export async function PATCH(
     const { id } = await params;
     const body = await req.json();
     const { nodes, edges } = body;
+
+    if (!hasSupabaseConfig()) {
+      return NextResponse.json({
+        workflow: {
+          id,
+          name: 'Demo Workflow',
+          nodes: Array.isArray(nodes) ? nodes : [],
+          edges: Array.isArray(edges) ? edges : [],
+          updated_at: new Date().toISOString(),
+        },
+      });
+    }
+
     const supabase = await createClient();
 
     const { data, error } = await supabase

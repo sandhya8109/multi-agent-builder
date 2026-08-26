@@ -1,9 +1,22 @@
 import { NextResponse } from 'next/server';
+import { hasSupabaseConfig } from '@/lib/env';
 import { createClient } from '@/lib/supabase/client';
 
 // GET all workflows
 export async function GET() {
   try {
+    if (!hasSupabaseConfig()) {
+      return NextResponse.json([
+        {
+          id: 'demo-workflow',
+          name: 'Demo Workflow',
+          created_at: new Date().toISOString(),
+          nodes: [],
+          edges: [],
+        },
+      ]);
+    }
+
     const supabase = createClient();
     const { data, error } = await supabase
       .from('workflows')
@@ -25,6 +38,17 @@ export async function GET() {
 // POST create workflow
 export async function POST(req: Request) {
   try {
+    if (!hasSupabaseConfig()) {
+      const demoWorkflow = {
+        id: `demo-${Date.now()}`,
+        name: 'New Multi-Agent Workflow',
+        created_at: new Date().toISOString(),
+        nodes: [],
+        edges: [],
+      };
+      return NextResponse.json(demoWorkflow);
+    }
+
     const supabase = createClient();
     const body = await req.json();
     const { name, title, nodes = [], edges = [] } = body;
@@ -57,6 +81,10 @@ export async function POST(req: Request) {
 // DELETE workflow by ID
 export async function DELETE(req: Request) {
   try {
+    if (!hasSupabaseConfig()) {
+      return NextResponse.json({ success: true });
+    }
+
     const supabase = createClient();
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
