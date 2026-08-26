@@ -2,19 +2,37 @@ import { NextResponse } from 'next/server';
 import { hasSupabaseConfig } from '@/lib/env';
 import { createClient } from '@/lib/supabase/client';
 
+const DEMO_WORKFLOW_ID = 'demo-workflow';
+
+const demoWorkflowState: {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  nodes: any[];
+  edges: any[];
+} = {
+  id: DEMO_WORKFLOW_ID,
+  name: 'Demo Workflow',
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+  nodes: [],
+  edges: [],
+};
+
+function getDemoWorkflowSnapshot() {
+  return {
+    ...demoWorkflowState,
+    created_at: demoWorkflowState.created_at || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+}
+
 // GET all workflows
 export async function GET() {
   try {
     if (!hasSupabaseConfig()) {
-      return NextResponse.json([
-        {
-          id: 'demo-workflow',
-          name: 'Demo Workflow',
-          created_at: new Date().toISOString(),
-          nodes: [],
-          edges: [],
-        },
-      ]);
+      return NextResponse.json([getDemoWorkflowSnapshot()]);
     }
 
     const supabase = createClient();
@@ -39,14 +57,24 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     if (!hasSupabaseConfig()) {
-      const demoWorkflow = {
-        id: `demo-${Date.now()}`,
-        name: 'New Multi-Agent Workflow',
-        created_at: new Date().toISOString(),
-        nodes: [],
-        edges: [],
-      };
-      return NextResponse.json(demoWorkflow);
+      let body: any = {};
+      try {
+        body = await req.json();
+      } catch {
+        // Empty body passed.
+      }
+
+      const { name, title, nodes = [], edges = [] } = body;
+      const workflowName = name || title || demoWorkflowState.name || 'New Multi-Agent Workflow';
+
+      demoWorkflowState.id = DEMO_WORKFLOW_ID;
+      demoWorkflowState.name = workflowName;
+      demoWorkflowState.nodes = Array.isArray(nodes) ? nodes : demoWorkflowState.nodes;
+      demoWorkflowState.edges = Array.isArray(edges) ? edges : demoWorkflowState.edges;
+      demoWorkflowState.created_at = demoWorkflowState.created_at || new Date().toISOString();
+      demoWorkflowState.updated_at = new Date().toISOString();
+
+      return NextResponse.json(getDemoWorkflowSnapshot());
     }
 
     const supabase = createClient();
