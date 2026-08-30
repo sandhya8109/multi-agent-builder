@@ -24,13 +24,13 @@ export function NodePalette() {
       },
       data: {
         label:
-          type === 'agent'
+          type === 'agentNode'
             ? 'Agent Node'
-            : type === 'input'
+            : type === 'inputNode'
               ? 'User Input'
-              : type === 'api'
+              : type === 'apiNode'
                 ? 'API Fetcher'
-                : type === 'rag'
+                : type === 'ragNode'
                   ? 'RAG Filter'
                   : 'Final Output',
       },
@@ -46,8 +46,8 @@ export function NodePalette() {
 
       {/* Agent Node */}
       <div
-        onClick={() => handleAddNode('agent')}
-        onDragStart={(e) => onDragStart(e, 'agent')}
+        onClick={() => handleAddNode('agentNode')}
+        onDragStart={(e) => onDragStart(e, 'agentNode')}
         draggable
         className="flex items-center gap-3 p-3 rounded-xl border border-slate-800 bg-slate-900/50 hover:bg-slate-900 hover:border-blue-500/50 transition-all cursor-pointer active:scale-95"
       >
@@ -60,8 +60,8 @@ export function NodePalette() {
 
       {/* Input Node */}
       <div
-        onClick={() => handleAddNode('input')}
-        onDragStart={(e) => onDragStart(e, 'input')}
+        onClick={() => handleAddNode('inputNode')}
+        onDragStart={(e) => onDragStart(e, 'inputNode')}
         draggable
         className="flex items-center gap-3 p-3 rounded-xl border border-slate-800 bg-slate-900/50 hover:bg-slate-900 hover:border-emerald-500/50 transition-all cursor-pointer active:scale-95"
       >
@@ -74,8 +74,8 @@ export function NodePalette() {
 
       {/* API Fetcher Node */}
       <div
-        onClick={() => handleAddNode('api')}
-        onDragStart={(e) => onDragStart(e, 'api')}
+        onClick={() => handleAddNode('apiNode')}
+        onDragStart={(e) => onDragStart(e, 'apiNode')}
         draggable
         className="flex items-center gap-3 p-3 rounded-xl border border-slate-800 bg-slate-900/50 hover:bg-slate-900 hover:border-amber-500/50 transition-all cursor-pointer active:scale-95"
       >
@@ -88,8 +88,8 @@ export function NodePalette() {
 
       {/* RAG Vector Search Node */}
       <div
-        onClick={() => handleAddNode('rag')}
-        onDragStart={(e) => onDragStart(e, 'rag')}
+        onClick={() => handleAddNode('ragNode')}
+        onDragStart={(e) => onDragStart(e, 'ragNode')}
         draggable
         className="flex items-center gap-3 p-3 rounded-xl border border-slate-800 bg-slate-900/50 hover:bg-slate-900 hover:border-amber-500/50 transition-all cursor-pointer active:scale-95"
       >
@@ -102,8 +102,8 @@ export function NodePalette() {
 
       {/* Output Node */}
       <div
-        onClick={() => handleAddNode('output')}
-        onDragStart={(e) => onDragStart(e, 'output')}
+        onClick={() => handleAddNode('outputNode')}
+        onDragStart={(e) => onDragStart(e, 'outputNode')}
         draggable
         className="flex items-center gap-3 p-3 rounded-xl border border-slate-800 bg-slate-900/50 hover:bg-slate-900 hover:border-purple-500/50 transition-all cursor-pointer active:scale-95"
       >

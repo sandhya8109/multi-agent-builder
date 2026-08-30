@@ -3,7 +3,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { RAGNode } from '@/components/canvas/custom-nodes/RAGNode';
 
 export async function createWorkflowAction() {
   const supabase = await createClient();
@@ -15,19 +14,19 @@ export async function createWorkflowAction() {
   const initialNodes = [
     {
       id: 'node_input',
-      type: 'input',
+      type: 'inputNode',
       position: { x: 250, y: 80 },
       data: { label: 'User Input', value: '', status: 'IDLE' },
     },
     {
       id: 'node_agent_1',
-      type: 'agent',
+      type: 'agentNode',
       position: { x: 250, y: 220 },
       data: {
         label: 'Summary Agent',
         role: 'Summarizer',
-        systemPrompt: 'Summarize the input text into 3 concise bullet points.',
-        model: 'llama-3.3-70b-versatile',
+        instructions: 'Summarize the input text into 3 concise bullet points.',
+        model: 'openai/gpt-oss-20b',
         status: 'IDLE',
       },
     },

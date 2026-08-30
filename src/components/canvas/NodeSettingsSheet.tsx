@@ -40,19 +40,21 @@ export function NodeSettingsSheet({ nodeId, onClose }: NodeSettingsSheetProps) {
       {/* Settings Forms */}
       <div className="flex-1 overflow-y-auto p-4 space-y-5 text-xs text-slate-300">
         {/* AGENT NODE CONFIG */}
-        {selectedNode.type === 'agent' && (
+        {(selectedNode.type === 'agentNode' || selectedNode.type === 'agent') && (
           <>
             <div>
               <label className="block mb-1.5 font-medium text-slate-400 flex items-center gap-1.5">
                 <Cpu className="w-3.5 h-3.5 text-purple-400" /> LLM Model
               </label>
               <select
-                value={data.model || 'gpt-4o-mini'}
+                value={data.model || 'openai/gpt-oss-20b'}
                 onChange={(e) => updateNodeData(selectedNode.id, { model: e.target.value })}
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-200 focus:outline-none focus:border-blue-500"
               >
+                <option value="openai/gpt-oss-20b">Groq (gpt-oss-20b, fast)</option>
+                <option value="openai/gpt-oss-120b">Groq (gpt-oss-120b, quality)</option>
+                <option value="qwen/qwen3.8-27b">Groq (qwen3.8-27b)</option>
                 <option value="gpt-4o-mini">OpenAI (gpt-4o-mini)</option>
-                <option value="llama-3.3-70b-versatile">Groq (llama-3.3-70b)</option>
               </select>
             </div>
 
@@ -78,8 +80,8 @@ export function NodeSettingsSheet({ nodeId, onClose }: NodeSettingsSheetProps) {
               <label className="block mb-1.5 font-medium text-slate-400">System Instructions</label>
               <textarea
                 rows={5}
-                value={data.systemInstructions || data.instructions || ''}
-                onChange={(e) => updateNodeData(selectedNode.id, { systemInstructions: e.target.value })}
+                value={data.instructions || ''}
+                onChange={(e) => updateNodeData(selectedNode.id, { instructions: e.target.value })}
                 placeholder="Specify task instructions for this agent..."
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-blue-500 resize-none font-mono text-[11px]"
               />
@@ -88,7 +90,7 @@ export function NodeSettingsSheet({ nodeId, onClose }: NodeSettingsSheetProps) {
         )}
 
         {/* API NODE CONFIG */}
-        {selectedNode.type === 'api' && (
+        {(selectedNode.type === 'apiNode' || selectedNode.type === 'api') && (
           <div>
             <label className="block mb-1.5 font-medium text-slate-400 flex items-center gap-1.5">
               <LinkIcon className="w-3.5 h-3.5 text-amber-400" /> API Endpoint URL
@@ -104,7 +106,7 @@ export function NodeSettingsSheet({ nodeId, onClose }: NodeSettingsSheetProps) {
         )}
 
         {/* RAG NODE CONFIG */}
-        {selectedNode.type === 'rag' && (
+        {(selectedNode.type === 'ragNode' || selectedNode.type === 'rag') && (
           <>
             <div>
               <label className="block mb-1.5 font-medium text-slate-400">Search Query / Keyword</label>
@@ -132,7 +134,7 @@ export function NodeSettingsSheet({ nodeId, onClose }: NodeSettingsSheetProps) {
         )}
 
         {/* INPUT NODE CONFIG */}
-        {selectedNode.type === 'input' && (
+        {(selectedNode.type === 'inputNode' || selectedNode.type === 'input') && (
           <div>
             <label className="block mb-1.5 font-medium text-slate-400 flex items-center gap-1.5">
               <FileText className="w-3.5 h-3.5 text-emerald-400" /> Input Context Text

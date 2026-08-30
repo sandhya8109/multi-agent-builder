@@ -1,137 +1,102 @@
 import { NextResponse } from 'next/server';
-import { runWorkflowDAG } from '@/lib/ai/dag-runner';
 import { createClient } from '@/lib/supabase/server';
+import { executeWorkflowDAG } from '@/lib/ai/dag-runner';
+import { isInputNode } from '@/lib/ai/node-types';
+import { isPlaceholderOrEmpty } from '@/lib/utils/input-validation';
+import type { WorkflowNode, WorkflowEdge } from '@/lib/types/workflow';
 
 export async function POST(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const resolvedParams = await params;
-    const workflowId = resolvedParams.id;
+    const { id } = await params;
+    const supabase = await createClient();
+    const body = await request.json();
+    const nodes: WorkflowNode[] = body.nodes || [];
+    const edges: WorkflowEdge[] = body.edges || [];
+    // The client generates a runId so the Execution Logs panel can start
+    // subscribing before this request finishes; fall back to generating
+    // one here so the route still works if called without it.
+    const runId: string = body.runId || crypto.randomUUID();
 
-    let body: any = {};
-    try {
-      body = await req.json();
-    } catch {
-      // Empty body passed
-    }
+    let hasInputError = false;
 
-    let nodes = body.nodes;
-    let edges = body.edges;
+    // 1. Inspect Input Nodes for unedited placeholder/example text
+    for (const node of nodes) {
+      if (isInputNode(node.type)) {
+        const textVal = node.data?.value || '';
 
-    // Fallback to Supabase if nodes or edges are not in request body
-    if (!nodes || !edges) {
-      try {
-        const supabase = await createClient();
-        const { data: workflow } = await supabase
-          .from('workflows')
-          .select('nodes, edges')
-          .eq('id', workflowId)
-          .single();
-
-        if (workflow) {
-          nodes = nodes || workflow.nodes;
-          edges = edges || workflow.edges;
+        if (isPlaceholderOrEmpty(textVal)) {
+          hasInputError = true;
+          node.data = {
+            ...node.data,
+            status: 'ERROR',
+            errorMessage:
+              '⚠️ Action required: replace placeholder text with real input data before running.',
+            output: '',
+          };
+        } else {
+          node.data = { ...node.data, status: 'SUCCESS', errorMessage: null, output: textVal };
         }
-      } catch (dbErr) {
-        console.warn('Could not fetch workflow from database fallback:', dbErr);
       }
     }
 
-    nodes = Array.isArray(nodes) ? nodes : [];
-    edges = Array.isArray(edges) ? edges : [];
+    // 2. Halt immediately if any input still contains placeholder/empty text
+    if (hasInputError) {
+      for (const node of nodes) {
+        if (!isInputNode(node.type)) {
+          node.data = { ...node.data, status: 'IDLE', output: 'Awaiting valid input data...' };
+        }
+      }
 
-    if (nodes.length === 0) {
-      return NextResponse.json(
-        { success: false, error: 'Canvas is empty. Add nodes to execute the workflow.' },
-        { status: 400 }
-      );
+      if (id) {
+        await supabase.from('workflows').update({ nodes, edges }).eq('id', id);
+      }
+
+      return NextResponse.json({
+        success: false,
+        message: 'Workflow paused: please provide valid input data.',
+        nodes,
+        runId,
+      });
     }
 
-    // Pre-process Agent system prompts to interpolate {{JOB_DESCRIPTION}} and {{RESUME_TEXT}}
-    const processedNodes = nodes.map((node: any) => {
-      if (node.type === 'agentNode' || node.type === 'agent') {
-        const incomingEdges = edges.filter((e: any) => e.target === node.id);
-        const connectedNodes = incomingEdges.map((e: any) =>
-          nodes.find((n: any) => n.id === e.source)
-        );
-
-        let jobDescriptionText = '';
-        let resumeText = '';
-        let extraInputs: string[] = [];
-
-        connectedNodes.forEach((connNode: any) => {
-          if (!connNode) return;
-          const content = connNode.data?.value || connNode.data?.text || '';
-          const title = (connNode.data?.roleName || connNode.data?.title || '').toLowerCase();
-
-          // Match node content or title to classify Job Description vs Resume
-          if (title.includes('job') || title.includes('jd') || content.toLowerCase().includes('job description')) {
-            jobDescriptionText += content + '\n\n';
-          } else if (title.includes('resume') || title.includes('cv') || content.toLowerCase().includes('experience')) {
-            resumeText += content + '\n\n';
-          } else {
-            extraInputs.push(content);
-          }
+    // 3. Execute the DAG — one shared executor for every node type
+    // (agent, input, api, rag, output), logging each node's result to
+    // Supabase as it completes so the Execution Logs panel can stream it
+    // in via realtime.
+    const { nodes: executedNodes, logs } = await executeWorkflowDAG(nodes, edges, {
+      onNodeLog: async (log) => {
+        const { error } = await supabase.from('run_logs').insert({
+          run_id: runId,
+          workflow_id: id,
+          node_id: log.nodeId,
+          node_label: log.nodeLabel,
+          status: log.status,
+          log_data: {
+            input_context: log.inputContext,
+            output: log.output,
+            error: log.error ?? null,
+          },
         });
 
-        // Fallback: If no clear title matching, assign connected inputs by position
-        if (!jobDescriptionText && connectedNodes[0]) {
-          jobDescriptionText = connectedNodes[0].data?.value || connectedNodes[0].data?.text || '';
+        if (error) {
+          // Do not fail the run over a logging problem, but do not hide it
+          // either — most likely cause is the run_logs table/migration
+          // hasn't been applied yet (see supabase/migrations).
+          console.error('[execute] Failed to write run_logs row:', error.message);
         }
-        if (!resumeText && connectedNodes[1]) {
-          resumeText = connectedNodes[1].data?.value || connectedNodes[1].data?.text || '';
-        }
-
-        let instructions = node.data?.instructions || node.data?.systemPrompt || '';
-
-        // Hydrate variables in system instructions
-        instructions = instructions
-          .replace('{{JOB_DESCRIPTION}}', jobDescriptionText.trim() || '[No Job Description Provided]')
-          .replace('{{RESUME_TEXT}}', resumeText.trim() || '[No Resume Provided]')
-          .replace('{{SENIORITY_LEVEL}}', node.data?.seniority || 'Not Specified (Infer from JD)')
-          .replace('{{INDUSTRY}}', node.data?.industry || 'Not Specified (Infer from JD)');
-
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            instructions,
-            // Pass full hydrated prompt to execution engine
-            userPrompt: extraInputs.length > 0 ? extraInputs.join('\n\n') : 'Evaluate the provided Job Description and Resume according to your system instructions.',
-          },
-        };
-      }
-      return node;
+      },
     });
 
-    // Run execution pipeline with hydrated nodes
-    // Run execution pipeline with hydrated nodes
-    const result = await runWorkflowDAG(processedNodes, edges);
-
-    // PERSIST EXECUTION RUN TO SUPABASE
-    try {
-      const supabase = await createClient();
-      await supabase.from('workflow_runs').insert({
-        workflow_id: workflowId,
-        status: 'COMPLETED',
-        input_data: {
-          nodes: processedNodes.map((n: any) => ({
-            id: n.id,
-            type: n.type,
-            title: n.data?.label || n.data?.title,
-          })),
-          edgesCount: edges.length,
-        },
-      });
-    } catch (logErr) {
-      console.error('Failed to persist execution log:', logErr);
+    if (id) {
+      await supabase.from('workflows').update({ nodes: executedNodes, edges }).eq('id', id);
     }
 
-    return NextResponse.json({
-      success: true,
-      workflowId,
-      nodes: result.nodes,
-      outputs: result.outputs,
-    });
+    return NextResponse.json({ success: true, nodes: executedNodes, runId, logs });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}

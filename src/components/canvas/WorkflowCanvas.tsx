@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useRef, useEffect } from 'react';
+import React, { useCallback } from 'react';
 import {
   ReactFlow,
   Background,
@@ -50,30 +50,13 @@ function InnerWorkflowCanvas({ workflowId, onNodeClick }: WorkflowCanvasProps) {
   onConnect,
   addNode, } = useCanvasStore((s: any) => s);
 
-  const isInitialized = useRef(false);
   const { screenToFlowPosition } = useReactFlow();
 
-  // Load saved workflow state on mount
-  useEffect(() => {
-    if (isInitialized.current) return;
-    isInitialized.current = true;
-
-    async function loadCanvas() {
-      try {
-        const res = await fetch(`/api/workflows/${workflowId}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data.workflow) {
-          if (data.workflow.nodes) setNodes(data.workflow.nodes);
-          if (data.workflow.edges) setEdges(data.workflow.edges);
-        }
-      } catch (err) {
-        console.error('Failed to load workflow state:', err);
-      }
-    }
-
-    loadCanvas();
-  }, [workflowId, setNodes, setEdges]);
+  // Workflow state (nodes/edges) is loaded exactly once, by the parent
+  // CanvasWrapper, which owns `isLoading` and only mounts this component
+  // once the Zustand store has been populated. Fetching here too used to
+  // race CanvasWrapper's own load and could blow away real data with an
+  // empty canvas depending on which request resolved last.
 
   // Handle Drag & Drop Node Creation
   const onDragOver = useCallback((event: React.DragEvent) => {

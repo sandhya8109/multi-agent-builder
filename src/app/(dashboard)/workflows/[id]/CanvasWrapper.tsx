@@ -11,6 +11,8 @@ import { TemplateModal } from '@/components/canvas/TemplateModal';
 import { useCanvasStore } from '@/lib/hooks/useCanvasStore';
 import { getLayoutedElements } from '@/lib/utils/layout';
 import { WorkflowTemplate } from '@/lib/constants/templates';
+import { isInputNode } from '@/lib/ai/node-types';
+import { isPlaceholderOrEmpty } from '@/lib/utils/input-validation';
 import {
   Play,
   Save,
@@ -55,8 +57,9 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
         const res = await fetch(`/api/workflows/${workflowId}`);
         if (res.ok) {
           const data = await res.json();
-          setNodes(data.nodes || []);
-          setEdges(data.edges || []);
+          // GET /api/workflows/[id] returns { workflow: {...} } — see route.ts
+          setNodes(data.workflow?.nodes || []);
+          setEdges(data.workflow?.edges || []);
         } else {
           console.error('Failed to load workflow data from database');
         }
@@ -128,66 +131,56 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
     reader.readAsText(file);
   };
 
-  // Run Workflow Action
   const handleRunWorkflow = async () => {
-    setIsRunning(true);
-    await handleSaveCanvas();
+    // 1. Validate every User Input node before making API calls. Uses the
+    // same isPlaceholderOrEmpty/isInputNode logic the server enforces in
+    // execute/route.ts, so client and server can never disagree.
+    const inputNodes = nodes.filter((n) => isInputNode(n.type));
 
-    const safeNodes = Array.isArray(nodes) ? nodes : [];
-
-    // Mark agent nodes as RUNNING
-    safeNodes.forEach((node) => {
-      if (node.type === 'agent' || node.type === 'agentNode') {
-        updateNodeData(node.id, { status: 'RUNNING' });
+    for (const node of inputNodes) {
+      if (isPlaceholderOrEmpty(String(node.data?.value || ''))) {
+        alert(
+          '⚠️ Input Data Required\n\nPlease enter real data into the "User Input" node before running the workflow.'
+        );
+        return; // Stop execution cleanly
       }
-    });
+    }
+
+    // 2. Execute workflow via API safely
+    const runId =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `run_${Date.now()}`;
 
     try {
+      setIsRunning(true);
+      // Set before the request resolves so the Logs panel, if opened
+      // mid-run, can subscribe and stream node results as they land.
+      setActiveRunId(runId);
+
       const res = await fetch(`/api/workflows/${workflowId}/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nodes, edges }),
+        body: JSON.stringify({ nodes, edges, runId }),
       });
 
-      const resText = await res.text();
-      let result: any = {};
-      try {
-        result = JSON.parse(resText);
-      } catch {
-        throw new Error(`Server returned non-JSON response (${res.status}).`);
-      }
+      const result = await res.json();
 
+      // 3. Prevent uncaught exceptions: Show dialogue box if backend rejects request
       if (!res.ok || !result.success) {
-        throw new Error(result.error || 'Workflow execution failed');
+        alert(
+          `⚠️ Execution Notice\n\n${result.error || result.message || 'Failed to run workflow.'
+          }`
+        );
+        return;
       }
 
-      setActiveRunId(result.workflowId);
-
-      if (Array.isArray(result.nodes) && result.nodes.length > 0) {
+      // Update canvas nodes with latest agent results
+      if (result.nodes) {
         setNodes(result.nodes);
-      } else {
-        const outputs: Record<string, string> = result.outputs || {};
-        safeNodes.forEach((node) => {
-          if (
-            node.type === 'agent' ||
-            node.type === 'agentNode' ||
-            node.type === 'output' ||
-            node.type === 'outputNode'
-          ) {
-            updateNodeData(node.id, {
-              status: 'SUCCESS',
-              output: outputs[node.id] || 'Step completed successfully.',
-            });
-          }
-        });
       }
     } catch (err: any) {
-      console.error('Workflow Execution Error:', err);
-      safeNodes.forEach((node) => {
-        if (node.type === 'agent' || node.type === 'agentNode') {
-          updateNodeData(node.id, { status: 'FAILED' });
-        }
-      });
+      alert(`⚠️ Execution Failed\n\n${err.message || 'An unexpected error occurred.'}`);
     } finally {
       setIsRunning(false);
     }
@@ -226,11 +219,10 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
               onClick={() => setIsSidebarOpen((prev) => !prev)}
               size="sm"
               variant="outline"
-              className={`border-slate-800 text-xs flex items-center gap-1.5 transition-colors ${
-                isSidebarOpen
+              className={`border-slate-800 text-xs flex items-center gap-1.5 transition-colors ${isSidebarOpen
                   ? 'bg-blue-500/10 text-blue-400 border-blue-500/30'
                   : 'text-slate-300 hover:bg-slate-900'
-              }`}
+                }`}
               title={isSidebarOpen ? 'Hide Node Palette' : 'Show Node Palette'}
             >
               <PanelLeft className="w-3.5 h-3.5" />
@@ -318,9 +310,8 @@ export default function CanvasWrapper({ workflowId }: CanvasWrapperProps) {
         {/* Main Canvas Area */}
         <div className="flex flex-1 relative overflow-hidden">
           <div
-            className={`transition-all duration-300 ease-in-out border-r border-slate-800 bg-slate-950 z-10 ${
-              isSidebarOpen ? 'w-64 opacity-100' : 'w-0 opacity-0 overflow-hidden border-none'
-            }`}
+            className={`transition-all duration-300 ease-in-out border-r border-slate-800 bg-slate-950 z-10 ${isSidebarOpen ? 'w-64 opacity-100' : 'w-0 opacity-0 overflow-hidden border-none'
+              }`}
           >
             <div className="w-64 h-full">
               <NodePalette />
