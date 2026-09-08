@@ -127,9 +127,16 @@ export default function HomePage() {
       const res = await fetch(`/api/workflows?id=${id}`, { method: 'DELETE' });
       if (res.ok) {
         setWorkflows((prev) => prev.filter((w) => w.id !== id));
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        console.error('Failed to delete workflow:', errorData);
+        alert(
+          `Could not delete this workflow: ${errorData.error || `server responded with ${res.status}`}`
+        );
       }
     } catch (err) {
       console.error('Failed to delete workflow:', err);
+      alert('Could not delete this workflow: request failed. Check your connection and try again.');
     }
   };
 
